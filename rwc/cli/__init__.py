@@ -107,6 +107,22 @@ def real_time(input_device, output_device, model, use_rmvpe):
 
 
 @cli.command()
+def tui():
+    """Start the Terminal User Interface (TUI) for RWC."""
+    click.echo("Starting RWC Terminal User Interface...")
+    click.echo("This provides an interactive menu for conversion options.")
+    
+    try:
+        from rwc.tui import main_tui
+        main_tui()
+    except ImportError as e:
+        click.echo(f"Error starting TUI: {str(e)}")
+        click.echo("Please make sure you have the required dependencies installed.")
+    except Exception as e:
+        click.echo(f"Unexpected error in TUI: {str(e)}")
+
+
+@cli.command()
 def download_additional_models():
     """Download additional models for RWC from various repositories."""
     click.echo("This command executes the download_additional_models.sh script.")

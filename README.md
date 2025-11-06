@@ -187,6 +187,23 @@ The RWC WebUI is a Gradio-based web interface accessible at `http://localhost:78
 
 The real-time conversion tab allows you to configure options for live microphone conversion and provides the command to run for actual real-time conversion.
 
+## Terminal User Interface (TUI)
+
+The RWC system also provides a TUI (Terminal User Interface) for easier interaction:
+
+```bash
+rwc tui
+```
+
+The TUI provides:
+- Interactive menu-driven interface
+- File-based conversion functionality  
+- Real-time conversion configuration
+- Audio device listing
+- Model listing and selection
+- Help information
+- Unified interface for all RWC features
+
 ## Microphone Support
 
 The RWC system supports real-time voice conversion from microphone input with the following setup:
