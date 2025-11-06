@@ -46,8 +46,10 @@ def list_models():
         for root, dirs, files in os.walk(models_dir):
             for file in files:
                 if file.endswith(('.pth', '.onnx', '.pt')):
-                    model_files.append(os.path.join(root, file))
-        return model_files
+                    # Skip files that are not intended for voice conversion
+                    if 'hubert' not in file.lower() and 'rmvpe' not in file.lower():
+                        model_files.append(os.path.join(root, file))
+        return sorted(model_files)
     return []
 
 # Define the Gradio interface
