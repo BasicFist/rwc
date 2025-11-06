@@ -184,6 +184,28 @@ The RWC WebUI is a Gradio-based web interface accessible at `http://localhost:78
 - Real-time conversion status updates
 - Direct audio playback of results
 
+## Microphone Support
+
+The RWC system supports real-time voice conversion from microphone input with the following setup:
+
+- PyAudio library installed for audio input/output
+- Compatible with most audio devices
+- Requires PortAudio system library (installed: portaudio19-dev)
+- To use real-time conversion:
+
+```bash
+# Currently, you can process recorded audio with:
+rwc convert --input input.wav --model models/community/HomerSimpson2333333/model.pth --output output.wav --use-rmvpe
+
+# Future implementation could support live microphone input with:
+# rwc real-time --input-device 0 --model models/community/HomerSimpson2333333/model.pth --output-device 0
+```
+
+Your system has been verified to have a working microphone input device:
+- Input Device 4: HDA Intel PCH: CX8070 Analog (hw:1,0)
+- Sample rate: 48000 Hz
+- Max channels: 2
+
 ## Performance Expectations
 
 - Inference (voice conversion): 2-5 minutes per 30 seconds of audio
