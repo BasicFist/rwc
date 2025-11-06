@@ -19,9 +19,11 @@ def cli():
 @click.option('--output', '-o', default='output.wav', help='Output file path')
 @click.option('--pitch-change', '-p', default=0, type=int, help='Pitch change in semitones (-24 to 24)')
 @click.option('--index-rate', '-ir', default=0.75, type=float, help='Index rate (0.0 to 1.0)')
-def convert(input, model, output, pitch_change, index_rate):
+@click.option('--use-rmvpe/--no-rmvpe', default=True, help='Use RMVPE for pitch extraction (more accurate)')
+def convert(input, model, output, pitch_change, index_rate, use_rmvpe):
     """Convert voice from input audio using specified model."""
     click.echo(f"Converting voice from {input} using model {model}")
+    click.echo(f"Using {'RMVPE' if use_rmvpe else 'default'} pitch extraction")
     click.echo(f"Pitch change: {pitch_change}, Index rate: {index_rate}")
     click.echo(f"Saving to {output}")
     
@@ -34,7 +36,7 @@ def convert(input, model, output, pitch_change, index_rate):
         return
     
     try:
-        converter = VoiceConverter(model)
+        converter = VoiceConverter(model, use_rmvpe=use_rmvpe)
         result_path = converter.convert_voice(input, output, pitch_change, index_rate)
         click.echo(f"Successfully converted voice. Output saved to: {result_path}")
     except Exception as e:
@@ -79,6 +81,13 @@ def download_models():
     # Import and run the download utility
     from rwc.utils import download_models
     download_models()
+
+
+@cli.command()
+def download_additional_models():
+    """Download additional models for RWC from various repositories."""
+    click.echo("This command executes the download_additional_models.sh script.")
+    click.echo("Please run: bash download_additional_models.sh")
 
 
 if __name__ == '__main__':

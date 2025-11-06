@@ -25,6 +25,7 @@ def convert_voice():
     - model_path: path to the RVC model
     - pitch_change: optional pitch change (default 0)
     - index_rate: optional index rate (default 0.75)
+    - use_rmvpe: whether to use RMVPE for pitch extraction (default true)
     """
     global converter
     
@@ -35,13 +36,14 @@ def convert_voice():
     model_path = request.form.get('model_path')
     pitch_change = int(request.form.get('pitch_change', 0))
     index_rate = float(request.form.get('index_rate', 0.75))
+    use_rmvpe = request.form.get('use_rmvpe', 'true').lower() in ['true', '1', 'yes', 'on']
     
     if not model_path or not os.path.exists(model_path):
         return jsonify({"error": "Valid model path required"}), 400
     
     # Initialize converter if not already done
     if converter is None or converter.model_path != model_path:
-        converter = VoiceConverter(model_path)
+        converter = VoiceConverter(model_path, use_rmvpe=use_rmvpe)
     
     # Save uploaded file temporarily
     input_path = f"/tmp/rwc_input_{id(audio_file)}.wav"

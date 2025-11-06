@@ -7,7 +7,7 @@ import gradio as gr
 import torch
 from rwc.core import VoiceConverter
 
-def convert_voice_interface(audio_input, model_path, pitch_change, index_rate):
+def convert_voice_interface(audio_input, model_path, pitch_change, index_rate, use_rmvpe):
     """
     Gradio interface function for voice conversion
     """
@@ -22,7 +22,7 @@ def convert_voice_interface(audio_input, model_path, pitch_change, index_rate):
         output_path = audio_input.replace('.wav', '_converted.wav')
         
         # Initialize converter and perform conversion
-        converter = VoiceConverter(model_path)
+        converter = VoiceConverter(model_path, use_rmvpe=bool(use_rmvpe))
         result_path = converter.convert_voice(
             audio_input,
             output_path,
@@ -66,6 +66,9 @@ with gr.Blocks(title="RWC - Real-time Voice Conversion") as demo:
                 pitch_change = gr.Slider(minimum=-24, maximum=24, value=0, step=1, label="Pitch Change (semitones)")
                 index_rate = gr.Slider(minimum=0.0, maximum=1.0, value=0.75, step=0.05, label="Index Rate")
             
+            with gr.Row():
+                use_rmvpe = gr.Checkbox(label="Use RMVPE for pitch extraction (more accurate)", value=True)
+            
             convert_btn = gr.Button("Convert Voice", variant="primary")
         
         with gr.Column():
@@ -74,7 +77,7 @@ with gr.Blocks(title="RWC - Real-time Voice Conversion") as demo:
     
     convert_btn.click(
         fn=convert_voice_interface,
-        inputs=[audio_input, model_path, pitch_change, index_rate],
+        inputs=[audio_input, model_path, pitch_change, index_rate, use_rmvpe],
         outputs=[audio_output, status_output]
     )
     

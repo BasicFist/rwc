@@ -25,8 +25,15 @@ fi
 # Check if models exist
 if [ ! -d "models" ]; then
     echo "Models directory not found. You may need to download models first."
-    echo "To download models, run: bash download_models.sh"
+    echo "To download basic models, run: bash download_models.sh"
+    echo "To download additional models, run: bash download_additional_models.sh"
     echo "Or: python3 -m rwc.utils.download_models"
+fi
+
+# Check if RMVPE model exists
+if [ ! -f "models/rmvpe/rmvpe.pt" ]; then
+    echo "Warning: RMVPE model not found. For better pitch extraction, run:"
+    echo "bash download_additional_models.sh"
 fi
 
 # Start the RWC service

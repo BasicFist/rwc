@@ -176,6 +176,50 @@ The RWC WebUI is accessible at `http://localhost:7865` when running the web inte
 
 Your Quadro RTX 5000 provides exceptional performance—significantly faster than consumer RTX 3060 (12GB) with professional grade stability.
 
+## Additional Models and Datasets
+
+The RWC system works with various pre-trained models and can be enhanced with additional datasets. Here are resources for obtaining more models and training data:
+
+### Additional Pre-trained Models
+
+The following repositories contain additional RVC-compatible models:
+
+- [lj1995/VoiceConversionWebUI](https://huggingface.co/lj1995/VoiceConversionWebUI) - Original RVC models
+- [auskf/RVC-beta3-test](https://huggingface.co/auskf/RVC-beta3-test) - Additional RVC models
+- [Kit-Lemonfoot/kitlemonfoot_rvc_models](https://huggingface.co/Kit-Lemonfoot/kitlemonfoot_rvc_models) - Community models
+- [therealvul/RVC-Models](https://huggingface.co/therealvul/RVC-Models) - More voice models
+- [riptide2048/RVC-Models](https://huggingface.co/riptide2048/RVC-Models) - Additional models
+
+To download additional models, use the additional download script:
+```bash
+bash download_additional_models.sh
+```
+
+### Training Datasets
+
+To train custom voice models for RVC, you would typically need:
+
+- Clean audio recordings of the target voice (10-50 minutes of high-quality audio)
+- Audio preprocessing with noise reduction
+- Audio normalization and consistent formatting
+
+### Model Types
+
+RVC typically uses several types of models:
+
+- **Hubert Base**: For semantic feature extraction
+- **RMVPE**: For more accurate pitch extraction (alternative to Crepe)
+- **Pre-trained vocoders**: For audio synthesis (e.g., D32k, D40k, D48k, G32k, G40k, G48k)
+- **UVR5 models**: For audio separation tasks
+- **Custom-trained models**: Trained on specific voices/speakers
+
+### Download Additional Models
+
+To download additional models that may be useful, use:
+```bash
+bash download_additional_models.sh
+```
+
 ## Troubleshooting
 
 - If CUDA is not available after installation, ensure the NVIDIA drivers and CUDA are properly installed
