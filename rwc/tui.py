@@ -1,6 +1,6 @@
 """
 RWC Terminal User Interface (TUI)
-A simple text-based interface for Real-time Voice Conversion
+A comprehensive, navigable, and user-friendly interface for Real-time Voice Conversion
 """
 import os
 import sys
@@ -15,6 +15,26 @@ try:
 except ImportError:
     PYAUDIO_AVAILABLE = False
 
+try:
+    from colorama import Fore, Style, init
+    init(autoreset=True)
+    COLORS_AVAILABLE = True
+except ImportError:
+    COLORS_AVAILABLE = False
+    # Define fallback colors
+    class ColorsFallback:
+        RED = ''
+        GREEN = ''
+        YELLOW = ''
+        BLUE = ''
+        MAGENTA = ''
+        CYAN = ''
+        WHITE = ''
+        BRIGHT = ''
+        RESET = ''
+    Fore = ColorsFallback()
+    Style = ColorsFallback()
+
 from rwc.core import VoiceConverter
 from rwc.utils.audio_devices import list_audio_devices
 
@@ -24,11 +44,20 @@ def clear_screen():
     os.system('clear' if os.name == 'posix' else 'cls')
 
 
+def print_colored(text, color=Fore.WHITE, style=Style.NORMAL):
+    """Print colored text if colorama is available"""
+    if COLORS_AVAILABLE:
+        print(f"{color}{style}{text}")
+    else:
+        print(text)
+
+
 def print_header():
     """Print the header of the application"""
-    print("=" * 60)
-    print("              RWC - Real-time Voice Conversion")
-    print("=" * 60)
+    print_colored("=" * 60, Fore.CYAN, Style.BRIGHT)
+    print_colored("              RWC - Real-time Voice Conversion", Fore.MAGENTA, Style.BRIGHT)
+    print_colored("        A Comprehensive Terminal User Interface", Fore.CYAN)
+    print_colored("=" * 60, Fore.CYAN, Style.BRIGHT)
     print()
 
 
@@ -52,76 +81,99 @@ def select_model():
     models = list_available_models()
     
     if not models:
-        print("No models found. Please download models first.")
+        print_colored("No models found. Please download models first.", Fore.RED)
         return None
     
-    print("\nAvailable Models:")
+    print_colored("\nAvailable Models:", Fore.YELLOW)
     for i, model in enumerate(models, 1):
-        print(f"{i}. {os.path.basename(model)} ({model})")
+        # Format the model path for better readability
+        model_path_parts = model.split('/')
+        if len(model_path_parts) >= 3:
+            # Show parent directory and filename
+            parent_dir = model_path_parts[-2]
+            model_name = model_path_parts[-1]
+            display_text = f"{parent_dir}/{model_name}"
+        else:
+            display_text = os.path.basename(model)
+        
+        print_colored(f"{i:2d}. {display_text}", Fore.GREEN)
+        print_colored(f"    {model}", Fore.BLUE)
     
-    print(f"{len(models) + 1}. Enter custom model path")
-    print(f"{len(models) + 2}. Go back")
+    print_colored(f"{len(models) + 1}. Enter custom model path", Fore.CYAN)
+    print_colored(f"{len(models) + 2}. Go back", Fore.MAGENTA)
     
     try:
-        choice = int(input(f"\nSelect a model (1-{len(models)+2}): "))
+        choice = int(input(f"\n{Fore.YELLOW}Select a model (1-{len(models)+2}): {Fore.RESET}"))
         
         if 1 <= choice <= len(models):
             return models[choice - 1]
         elif choice == len(models) + 1:
-            return input("Enter path to model file: ").strip()
+            custom_path = input(f"{Fore.YELLOW}Enter path to model file: {Fore.RESET}").strip()
+            return custom_path if custom_path else None
         elif choice == len(models) + 2:
             return None
         else:
-            print("Invalid selection.")
+            print_colored("Invalid selection.", Fore.RED)
             return None
     except ValueError:
-        print("Invalid input. Please enter a number.")
+        print_colored("Invalid input. Please enter a number.", Fore.RED)
         return None
 
 
 def file_conversion_tui():
-    """File-based conversion interface"""
-    print("\n--- File Conversion ---")
+    """File-based conversion interface with improved UX"""
+    print_colored("\n--- File Conversion ---", Fore.CYAN, Style.BRIGHT)
     
     model_path = select_model()
     if not model_path:
         return
     
     if not os.path.exists(model_path):
-        print(f"Model not found: {model_path}")
+        print_colored(f"Model not found: {model_path}", Fore.RED)
         return
     
-    input_path = input("Enter path to input audio file: ").strip()
+    print_colored(f"\nSelected model: {os.path.basename(model_path)}", Fore.GREEN)
+    
+    input_path = input(f"{Fore.YELLOW}Enter path to input audio file: {Fore.RESET}").strip()
+    if not input_path:
+        print_colored("No input file specified.", Fore.RED)
+        return
+        
     if not os.path.exists(input_path):
-        print(f"Input audio file not found: {input_path}")
+        print_colored(f"Input audio file not found: {input_path}", Fore.RED)
         return
     
-    output_path = input("Enter output path for converted audio (default: output.wav): ").strip()
+    output_path = input(f"{Fore.YELLOW}Enter output path for converted audio (default: output.wav): {Fore.RESET}").strip()
     if not output_path:
         output_path = "output.wav"
     
     try:
-        pitch_change = int(input("Enter pitch change (-24 to 24, default: 0): ") or "0")
+        default_pitch = "0"
+        pitch_input = input(f"{Fore.YELLOW}Enter pitch change (-24 to 24, default: {default_pitch}): {Fore.RESET}") or default_pitch
+        pitch_change = int(pitch_input)
         if pitch_change < -24 or pitch_change > 24:
-            print("Pitch change must be between -24 and 24")
+            print_colored("Pitch change must be between -24 and 24", Fore.RED)
             return
     except ValueError:
-        print("Invalid pitch change value")
+        print_colored("Invalid pitch change value", Fore.RED)
         return
     
     try:
-        index_rate = float(input("Enter index rate (0.0 to 1.0, default: 0.75): ") or "0.75")
+        default_index = "0.75"
+        index_input = input(f"{Fore.YELLOW}Enter index rate (0.0 to 1.0, default: {default_index}): {Fore.RESET}") or default_index
+        index_rate = float(index_input)
         if index_rate < 0.0 or index_rate > 1.0:
-            print("Index rate must be between 0.0 and 1.0")
+            print_colored("Index rate must be between 0.0 and 1.0", Fore.RED)
             return
     except ValueError:
-        print("Invalid index rate value")
+        print_colored("Invalid index rate value", Fore.RED)
         return
     
-    use_rmvpe = input("Use RMVPE for pitch extraction? (y/N): ").lower().startswith('y')
+    use_rmvpe_input = input(f"{Fore.YELLOW}Use RMVPE for pitch extraction? (Y/n): {Fore.RESET}").lower()
+    use_rmvpe = True if use_rmvpe_input in ['', 'y', 'yes'] else False
     
-    print(f"\nConverting with model: {os.path.basename(model_path)}")
-    print("This may take a moment...")
+    print_colored(f"\nConverting with model: {os.path.basename(model_path)}", Fore.CYAN)
+    print_colored("This may take a moment...", Fore.YELLOW)
     
     try:
         converter = VoiceConverter(model_path, use_rmvpe=use_rmvpe)
@@ -131,21 +183,21 @@ def file_conversion_tui():
             pitch_change=pitch_change,
             index_rate=index_rate
         )
-        print(f"\n✓ Conversion completed successfully!")
-        print(f"Output saved to: {result_path}")
+        print_colored(f"\n✓ Conversion completed successfully!", Fore.GREEN, Style.BRIGHT)
+        print_colored(f"Output saved to: {result_path}", Fore.CYAN)
     except Exception as e:
-        print(f"\n✗ Conversion failed: {str(e)}")
+        print_colored(f"\n✗ Conversion failed: {str(e)}", Fore.RED)
 
 
 def real_time_conversion_tui():
-    """Real-time conversion interface"""
+    """Real-time conversion interface with improved UX"""
     if not PYAUDIO_AVAILABLE:
-        print("\nPyAudio is not available. Please install it with: pip install pyaudio")
-        print("Also ensure PortAudio is installed: sudo apt-get install portaudio19-dev")
+        print_colored("\nPyAudio is not available. Please install it with: pip install pyaudio", Fore.RED)
+        print_colored("Also ensure PortAudio is installed: sudo apt-get install portaudio19-dev", Fore.RED)
         return
     
-    print("\n--- Real-time Conversion ---")
-    print("Available audio devices:")
+    print_colored("\n--- Real-time Conversion ---", Fore.CYAN, Style.BRIGHT)
+    print_colored("Available audio devices:", Fore.YELLOW)
     list_audio_devices()
     
     model_path = select_model()
@@ -153,111 +205,159 @@ def real_time_conversion_tui():
         return
     
     if not os.path.exists(model_path):
-        print(f"Model not found: {model_path}")
+        print_colored(f"Model not found: {model_path}", Fore.RED)
         return
+    
+    print_colored(f"\nSelected model: {os.path.basename(model_path)}", Fore.GREEN)
     
     try:
-        input_device = int(input("Enter input device ID (default: 4): ") or "4")
-        output_device = int(input("Enter output device ID (default: 0): ") or "0")
+        default_input = "4"
+        input_device_str = input(f"{Fore.YELLOW}Enter input device ID (default: {default_input}): {Fore.RESET}") or default_input
+        input_device = int(input_device_str)
+        
+        default_output = "0"
+        output_device_str = input(f"{Fore.YELLOW}Enter output device ID (default: {default_output}): {Fore.RESET}") or default_output
+        output_device = int(output_device_str)
     except ValueError:
-        print("Invalid device ID. Please enter a number.")
+        print_colored("Invalid device ID. Please enter a number.", Fore.RED)
         return
     
-    use_rmvpe = input("Use RMVPE for pitch extraction? (y/N): ").lower().startswith('y')
+    use_rmvpe_input = input(f"{Fore.YELLOW}Use RMVPE for pitch extraction? (Y/n): {Fore.RESET}").lower()
+    use_rmvpe = True if use_rmvpe_input in ['', 'y', 'yes'] else False
     
-    print(f"\nStarting real-time conversion with model: {os.path.basename(model_path)}")
-    print("Press Ctrl+C to stop conversion")
-    print("Note: The actual real-time conversion will start in a new thread")
+    print_colored(f"\nStarting real-time conversion with model: {os.path.basename(model_path)}", Fore.CYAN)
+    print_colored("Press Ctrl+C to stop conversion", Fore.YELLOW)
+    print_colored("Note: The actual real-time conversion will start in a new thread", Fore.YELLOW)
     
     try:
         converter = VoiceConverter(model_path, use_rmvpe=use_rmvpe)
+        print_colored("\nReal-time conversion starting...", Fore.GREEN)
         converter.real_time_convert(input_device, output_device)
-        print("\nReal-time conversion completed!")
+        print_colored("\nReal-time conversion completed!", Fore.GREEN)
     except KeyboardInterrupt:
-        print("\nReal-time conversion stopped by user.")
+        print_colored("\nReal-time conversion stopped by user.", Fore.YELLOW)
     except Exception as e:
-        print(f"\nError during real-time conversion: {str(e)}")
+        print_colored(f"\nError during real-time conversion: {str(e)}", Fore.RED)
 
 
 def main_tui():
-    """Main TUI loop"""
+    """Main TUI loop with comprehensive navigation"""
     while True:
         clear_screen()
         print_header()
         
-        print("Select an option:")
-        print("1. File Conversion - Convert audio files using RVC models")
-        print("2. Real-time Conversion - Live microphone-based conversion")
-        print("3. List Audio Devices - Show available audio devices")
-        print("4. List Models - Show available RVC models")
-        print("5. Help - Show usage information")
-        print("6. Exit")
+        print_colored("Select an option:", Fore.YELLOW)
+        print_colored("1. 🎵 File Conversion", Fore.GREEN)
+        print_colored("   Convert audio files using RVC models", Fore.WHITE)
+        print_colored("2. 🎤 Real-time Conversion", Fore.GREEN) 
+        print_colored("   Live microphone-based voice conversion", Fore.WHITE)
+        print_colored("3. 🔧 Audio Devices", Fore.CYAN)
+        print_colored("   List available audio devices", Fore.WHITE)
+        print_colored("4. 🤖 Models", Fore.CYAN)
+        print_colored("   List available RVC models", Fore.WHITE)
+        print_colored("5. ❓ Help & Info", Fore.CYAN)
+        print_colored("   Show usage information and system info", Fore.WHITE)
+        print_colored("6. 🚪 Exit", Fore.RED)
         
         try:
-            choice = input("\nEnter your choice (1-6): ")
+            choice = input(f"\n{Fore.YELLOW}Enter your choice (1-6): {Fore.RESET}")
             
             if choice == '1':
                 file_conversion_tui()
-                input("\nPress Enter to return to the main menu...")
+                input(f"\n{Fore.CYAN}Press Enter to return to the main menu...{Fore.RESET}")
             elif choice == '2':
                 real_time_conversion_tui()
-                input("\nPress Enter to return to the main menu...")
+                input(f"\n{Fore.CYAN}Press Enter to return to the main menu...{Fore.RESET}")
             elif choice == '3':
-                print("\nAvailable audio devices:")
+                print_colored("\nAvailable audio devices:", Fore.YELLOW)
                 list_audio_devices()
-                input("\nPress Enter to return to the main menu...")
+                input(f"\n{Fore.CYAN}Press Enter to return to the main menu...{Fore.RESET}")
             elif choice == '4':
                 models = list_available_models()
                 if models:
-                    print("\nAvailable models:")
+                    print_colored(f"\nAvailable models ({len(models)}):", Fore.YELLOW)
                     for i, model in enumerate(models, 1):
-                        print(f"{i}. {model}")
+                        # Format for better readability
+                        model_path_parts = model.split('/')
+                        if len(model_path_parts) >= 3:
+                            parent_dir = model_path_parts[-2]
+                            model_name = model_path_parts[-1]
+                            display_text = f"{parent_dir}/{model_name}"
+                        else:
+                            display_text = os.path.basename(model)
+                            
+                        print_colored(f"{i:2d}. {display_text}", Fore.GREEN)
+                        print_colored(f"    {model}", Fore.BLUE)
                 else:
-                    print("\nNo models found. Please make sure models are downloaded.")
-                input("\nPress Enter to return to the main menu...")
+                    print_colored("\nNo models found. Please make sure models are downloaded.", Fore.RED)
+                input(f"\n{Fore.CYAN}Press Enter to return to the main menu...{Fore.RESET}")
             elif choice == '5':
-                print("""
-Help - RWC Terminal Interface
+                print_colored(f"\n{'='*60}", Fore.MAGENTA)
+                print_colored("                    HELP & INFORMATION", Fore.MAGENTA, Style.BRIGHT)
+                print_colored(f"{'='*60}", Fore.MAGENTA)
+                
+                print_colored("""
+📁 File Conversion:
+   • Convert audio files using RVC models
+   • Adjustable parameters (pitch, index rate)
+   • RMVPE support for accurate pitch extraction
 
-This TUI provides a simple terminal-based interface to the Real-time Voice 
-Conversion (RVC) system with the following features:
+🎤 Real-time Conversion:
+   • Live microphone-based voice conversion
+   • Device selection for input and output
+   • Same RVC models and parameters as file conversion
 
-1. File Conversion:
-   - Convert audio files using RVC models
-   - Adjustable parameters (pitch, index rate)
-   - RMVPE support for accurate pitch extraction
+🔧 Audio Devices:
+   • Shows available input and output audio devices
+   • Helps you select the correct device IDs
 
-2. Real-time Conversion:
-   - Live microphone-based voice conversion
-   - Device selection for input and output
-   - Same RVC models and parameters as file conversion
+🤖 Models:
+   • Shows all available RVC models in the system
+   • Supports both pretrained and community models including Homer Simpson
 
-3. Device Listing:
-   - Shows available input and output audio devices
-   - Helps you select the correct device IDs
+📊 System Information:""", Fore.YELLOW)
+                
+                # Display system info
+                print_colored(f"   • CUDA Available: {bool(__import__('torch').cuda.is_available())}", Fore.CYAN)
+                if __import__('torch').cuda.is_available():
+                    gpu_name = __import__('torch').cuda.get_device_name(0)
+                    print_colored(f"   • GPU: {gpu_name}", Fore.CYAN)
+                
+                print_colored(f"   • Total Models: {len(list_available_models())}", Fore.CYAN)
+                
+                if PYAUDIO_AVAILABLE:
+                    print_colored("   • Audio Input: Available", Fore.GREEN)
+                else:
+                    print_colored("   • Audio Input: Not Available", Fore.RED)
+                
+                print_colored("""
+📋 Prerequisites:
+   • PyAudio library (pip install pyaudio)
+   • PortAudio development library (sudo apt-get install portaudio19-dev)
+   • Downloaded RVC models
 
-4. Model Listing:
-   - Shows all available RVC models in the system
-   - Supports both pretrained and community models
-
-Prerequisites:
-- PyAudio library (install with: pip install pyaudio)
-- PortAudio development library (install with: sudo apt-get install portaudio19-dev)
-- Downloaded RVC models
-                """)
-                input("\nPress Enter to return to the main menu...")
+🎯 Tips:
+   • Use the Homer Simpson model for fun voice conversions
+   • Adjust pitch change for different vocal styles
+   • RMVPE provides better pitch extraction quality
+""", Fore.YELLOW)
+                
+                print_colored(f"{'='*60}", Fore.MAGENTA)
+                
+                input(f"\n{Fore.CYAN}Press Enter to return to the main menu...{Fore.RESET}")
             elif choice == '6':
-                print("\nThank you for using RWC Terminal Interface!")
+                print_colored("\n👋 Thank you for using RWC Terminal Interface!", Fore.GREEN, Style.BRIGHT)
+                print_colored("Have a great day!", Fore.CYAN)
                 break
             else:
-                print("\nInvalid choice. Please enter a number between 1 and 6.")
+                print_colored("\n❌ Invalid choice. Please enter a number between 1 and 6.", Fore.RED)
                 time.sleep(2)
         except KeyboardInterrupt:
-            print("\n\nReceived interrupt. Exiting...")
+            print_colored("\n\n⚠️ Received interrupt. Exiting...", Fore.YELLOW)
             break
         except Exception as e:
-            print(f"\nAn error occurred: {str(e)}")
-            input("\nPress Enter to return to the main menu...")
+            print_colored(f"\n💥 An error occurred: {str(e)}", Fore.RED)
+            input(f"\n{Fore.CYAN}Press Enter to return to the main menu...{Fore.RESET}")
 
 
 if __name__ == "__main__":

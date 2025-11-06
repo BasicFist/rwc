@@ -12,3 +12,4 @@ protobuf>=3.20.0
 chardet>=4.0.0
 flask>=2.0.0
 click>=8.0.0
+colorama>=0.4.0
