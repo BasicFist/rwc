@@ -175,7 +175,14 @@ When running the API server:
 
 ## Web Interface
 
-The RWC WebUI is accessible at `http://localhost:7865` when running the web interface.
+The RWC WebUI is a Gradio-based web interface accessible at `http://localhost:7865` when running the web interface. The interface provides:
+
+- User-friendly drag-and-drop audio upload
+- Model selection from available RVC models
+- Adjustable parameters (pitch change, index rate)
+- RMVPE toggle for enhanced pitch extraction
+- Real-time conversion status updates
+- Direct audio playback of results
 
 ## Performance Expectations
 
