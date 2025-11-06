@@ -217,7 +217,7 @@ bash download_additional_models.sh
 Based on Hugging Face data, here are some popular community RVC models:
 
 **Fictional Characters & Entertainment:**
-- [sail-rvc/HomerSimpson2333333](https://huggingface.co/sail-rvc/HomerSimpson2333333) - Homer Simpson voice (8,970 downloads)
+- [sail-rvc/HomerSimpson2333333](https://huggingface.co/sail-rvc/HomerSimpson2333333) - Homer Simpson voice (8,970 downloads) - **SET UP IN THIS INSTALLATION**
 - [sail-rvc/Hatsune_Miku__RVC_v2_](https://huggingface.co/sail-rvc/Hatsune_Miku__RVC_v2_) - Hatsune Miku voice (2,791 downloads)
 - [sail-rvc/ArthurMorgan](https://huggingface.co/sail-rvc/ArthurMorgan) - Arthur Morgan from Red Dead Redemption (1,832 downloads)
 - [sail-rvc/Jesse-Pinkman](https://huggingface.co/sail-rvc/Jesse-Pinkman) - Jesse Pinkman from Breaking Bad (1,727 downloads)
@@ -228,6 +228,22 @@ Based on Hugging Face data, here are some popular community RVC models:
 - [sail-rvc/ArnoldSchwarzenegger](https://huggingface.co/sail-rvc/ArnoldSchwarzenegger) - Arnold Schwarzenegger voice (1,323 downloads)
 - [sail-rvc/Ronaldo](https://huggingface.co/sail-rvc/Ronaldo) - Cristiano Ronaldo voice (2,273 downloads)
 - [sail-rvc/Messi__RVC_V2__Crepe__-_200_Epochs_](https://huggingface.co/sail-rvc/Messi__RVC_V2__Crepe__-_200_Epochs_) - Lionel Messi voice (1,214 downloads)
+
+### Using the Homer Simpson Model
+
+The Homer Simpson model has been pre-downloaded as part of this setup. Here's how to use it:
+
+1. **CLI**: Use the dedicated conversion script:
+   ```bash
+   bash convert_to_homer.sh -i input.wav -o output.wav
+   ```
+
+2. **Direct CLI**: Or use the rwc command directly:
+   ```bash
+   rwc convert --input input.wav --model models/community/HomerSimpson2333333/model.pth --output homer_output.wav --use-rmvpe
+   ```
+
+3. **Web Interface**: The model should appear in the dropdown when you refresh models in the Gradio interface.
 
 ### Using Community Models
 

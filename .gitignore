@@ -69,4 +69,4 @@ models/
 *.bin
 
 # Cache directories
-.cache/
+.cache/test_input.wav
