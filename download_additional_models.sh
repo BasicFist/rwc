@@ -12,6 +12,7 @@ mkdir -p models/pretrained
 mkdir -p models/uvr5_weights
 mkdir -p models/rmvpe
 mkdir -p models/checkpoints
+mkdir -p models/community
 
 echo "Downloading HuBERT base model (used for feature extraction)..."
 huggingface-cli download lj1995/VoiceConversionWebUI --include "hubert_base.pt" --local-dir ./models/hubert_base --revision main
@@ -32,14 +33,20 @@ huggingface-cli download lj1995/VoiceConversionWebUI --include "uvr5_weights/*" 
 echo "Downloading additional checkpoint models..."
 huggingface-cli download lj1995/VoiceConversionWebUI --include "checkpoints/*" --local-dir ./models/checkpoints --revision main
 
-# The following repositories often contain additional useful models:
+# The following are popular community models you can download separately:
 echo
-echo "Additional models can be found in these repositories:"
-echo "- https://huggingface.co/lj1995/VoiceConversionWebUI"
-echo "- https://huggingface.co/auskf/RVC-beta3-test"
-echo "- https://huggingface.co/Kit-Lemonfoot/kitlemonfoot_rvc_models"
-echo "- https://huggingface.co/therealvul/RVC-Models"
-echo "- https://huggingface.co/riptide2048/RVC-Models"
+echo "Popular community models (download separately):"
+echo "- sail-rvc/HomerSimpson2333333 (8,970 downloads)"
+echo "- sail-rvc/Donald_Trump__RVC_v2_ (5,951 downloads)"
+echo "- sail-rvc/Hatsune_Miku__RVC_v2_ (2,791 downloads)"
+echo "- sail-rvc/ArthurMorgan (1,832 downloads)"
+echo "- sail-rvc/Jesse-Pinkman (1,727 downloads)"
+echo
+echo "To download a community model, use:"
+echo "huggingface-cli download <username/model-name> --local-dir ./models/community/<model-name>"
+echo
+echo "Example:"
+echo "huggingface-cli download sail-rvc/HomerSimpson2333333 --local-dir ./models/community/HomerSimpson2333333"
 echo
 echo "For custom-trained models, you would typically train them using:"
 echo "- Your own voice dataset (typically 10-50 minutes of clean audio)"

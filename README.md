@@ -212,6 +212,36 @@ To download additional models, use the additional download script:
 bash download_additional_models.sh
 ```
 
+### Popular Community Models on Hugging Face
+
+Based on Hugging Face data, here are some popular community RVC models:
+
+**Fictional Characters & Entertainment:**
+- [sail-rvc/HomerSimpson2333333](https://huggingface.co/sail-rvc/HomerSimpson2333333) - Homer Simpson voice (8,970 downloads)
+- [sail-rvc/Hatsune_Miku__RVC_v2_](https://huggingface.co/sail-rvc/Hatsune_Miku__RVC_v2_) - Hatsune Miku voice (2,791 downloads)
+- [sail-rvc/ArthurMorgan](https://huggingface.co/sail-rvc/ArthurMorgan) - Arthur Morgan from Red Dead Redemption (1,832 downloads)
+- [sail-rvc/Jesse-Pinkman](https://huggingface.co/sail-rvc/Jesse-Pinkman) - Jesse Pinkman from Breaking Bad (1,727 downloads)
+- [sail-rvc/Peter_Griffin__Family_Guy___RVC_V2__300_Epoch](https://huggingface.co/sail-rvc/Peter_Griffin__Family_Guy___RVC_V2__300_Epoch) - Peter Griffin from Family Guy
+
+**Celebrities & Public Figures:**
+- [sail-rvc/Donald_Trump__RVC_v2_](https://huggingface.co/sail-rvc/Donald_Trump__RVC_v2_) - Donald Trump voice (5,951 downloads)
+- [sail-rvc/ArnoldSchwarzenegger](https://huggingface.co/sail-rvc/ArnoldSchwarzenegger) - Arnold Schwarzenegger voice (1,323 downloads)
+- [sail-rvc/Ronaldo](https://huggingface.co/sail-rvc/Ronaldo) - Cristiano Ronaldo voice (2,273 downloads)
+- [sail-rvc/Messi__RVC_V2__Crepe__-_200_Epochs_](https://huggingface.co/sail-rvc/Messi__RVC_V2__Crepe__-_200_Epochs_) - Lionel Messi voice (1,214 downloads)
+
+### Using Community Models
+
+To download and use these models:
+
+1. Find a model on Hugging Face that interests you
+2. Use the huggingface-cli to download:
+   ```bash
+   huggingface-cli download <username/model-name> --local-dir ./models/community/<model-name>
+   ```
+3. Use the model path in RWC for voice conversion
+
+**Important Note:** Be mindful of ethical and legal considerations when using voice models of real people. Only use these for appropriate, non-malicious purposes and be aware that using celebrity voices commercially may require permission.
+
 ### Training Datasets
 
 To train custom voice models for RVC, you would typically need:
