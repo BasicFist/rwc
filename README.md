@@ -183,6 +183,9 @@ The RWC WebUI is a Gradio-based web interface accessible at `http://localhost:78
 - RMVPE toggle for enhanced pitch extraction
 - Real-time conversion status updates
 - Direct audio playback of results
+- **NEW**: Real-time conversion tab for live microphone input
+
+The real-time conversion tab allows you to configure options for live microphone conversion and provides the command to run for actual real-time conversion.
 
 ## Microphone Support
 
