@@ -154,6 +154,16 @@ rwc/
 
 This project is built on the Retrieval-based Voice Conversion (RVC) framework. For detailed deployment instructions, system requirements, and optimization for your specific hardware (like NVIDIA Quadro RTX 5000), please refer to the [RVC_DEPLOYMENT_GUIDE.md](RVC_DEPLOYMENT_GUIDE.md) file included in this repository.
 
+## Configuration
+
+The project can be configured through the `rwc/config.ini` file which allows customization of:
+- Model paths and locations
+- Default conversion parameters
+- API and WebUI settings
+- Performance options
+
+You can also define environment variables in the `.env` file.
+
 ## API Endpoints
 
 When running the API server:
