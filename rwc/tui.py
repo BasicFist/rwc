@@ -232,7 +232,7 @@ def real_time_conversion_tui():
     try:
         converter = VoiceConverter(model_path, use_rmvpe=use_rmvpe)
         print_colored("\nReal-time conversion starting...", Fore.GREEN)
-        converter.real_time_convert(input_device, output_device)
+        converter.real_time_convert(input_device=input_device, output_device=output_device)
         print_colored("\nReal-time conversion completed!", Fore.GREEN)
     except KeyboardInterrupt:
         print_colored("\nReal-time conversion stopped by user.", Fore.YELLOW)

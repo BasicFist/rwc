@@ -3,11 +3,15 @@ Core RWC (Real-time Voice Conversion) functionality
 Based on RVC (Retrieval-based Voice Conversion) framework
 """
 import os
+import sys
+import time
 import torch
 import librosa
 import numpy as np
 from typing import Optional, Tuple
 import configparser
+import shutil
+import subprocess
 
 class VoiceConverter:
     """
@@ -128,7 +132,15 @@ class VoiceConverter:
         # For now, just return the output path
         return output_audio_path
     
-    def real_time_convert(self, input_device: int = 0, output_device: int = 0):
+    def real_time_convert(
+        self,
+        input_device: int = 0,
+        output_device: int = 0,
+        show_meter: bool = True,
+        meter_refresh: float = 0.1,
+        pipewire_source: Optional[int] = None,
+        pipewire_sink: Optional[int] = None,
+    ):
         """
         Perform real-time voice conversion using microphone input
         
@@ -136,6 +148,18 @@ class VoiceConverter:
         - PortAudio library (system library) - installed
         - PyAudio Python package - installed
         """
+        use_pwcat = shutil.which("pw-cat") is not None
+        
+        if use_pwcat:
+            print("pw-cat detected - using PipeWire default devices for streaming.")
+            self._real_time_convert_pwcat(
+                show_meter=show_meter,
+                meter_refresh=meter_refresh,
+                source_id=pipewire_source,
+                sink_id=pipewire_sink,
+            )
+            return
+        
         import pyaudio
         import numpy as np
         
@@ -174,16 +198,37 @@ class VoiceConverter:
             
             print("Real-time conversion streams opened successfully!")
             print("Recording and converting in real-time... (Press Ctrl+C to stop)")
+            if show_meter:
+                print("Microphone level meter active (updates every "
+                      f"{meter_refresh:.1f}s)")
             
             # For demonstration, just pass through audio with a simple processing
             # In a real implementation, this would involve RVC-style processing
             try:
+                last_meter_update = time.monotonic()
+                meter_bar_width = 30
+                epsilon = 1e-8
+                
                 while True:
                     # Read data from microphone
                     data = stream_in.read(chunk, exception_on_overflow=False)
                     
                     # Convert to numpy array for processing
                     audio_array = np.frombuffer(data, dtype=np.float32)
+                    
+                    if show_meter:
+                        now = time.monotonic()
+                        if now - last_meter_update >= meter_refresh:
+                            rms = float(np.sqrt(np.mean(np.square(audio_array))))
+                            meter_level = min(rms / 0.2, 1.0)
+                            filled = int(meter_level * meter_bar_width)
+                            bar = "#" * filled + "." * (meter_bar_width - filled)
+                            db = 20 * np.log10(max(rms, epsilon))
+                            sys.stdout.write(
+                                f"\rMic level [{bar}] {db:6.1f} dBFS"
+                            )
+                            sys.stdout.flush()
+                            last_meter_update = now
                     
                     # Here would be the actual RVC processing
                     # For now, just pass through with slight amplification to show processing
@@ -197,7 +242,11 @@ class VoiceConverter:
                     
             except KeyboardInterrupt:
                 print("\nReal-time conversion stopped by user.")
-                
+            finally:
+                if show_meter:
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+            
         except Exception as e:
             print(f"Error during real-time conversion: {e}")
         finally:
@@ -210,3 +259,123 @@ class VoiceConverter:
                 stream_out.close()
             p.terminate()
             print("Real-time conversion streams closed.")
+
+    def _real_time_convert_pwcat(
+        self,
+        rate: int = 48000,
+        channels: int = 1,
+        chunk: int = 1024,
+        show_meter: bool = True,
+        meter_refresh: float = 0.1,
+        source_id: Optional[int] = None,
+        sink_id: Optional[int] = None,
+    ):
+        """
+        PipeWire-based real-time loop using pw-cat for capture/playback.
+        """
+        import numpy as np
+
+        record_cmd = [
+            "pw-cat",
+            "--record",
+            f"--rate={rate}",
+            f"--channels={channels}",
+        ]
+        if source_id is not None:
+            record_cmd.extend(["--target", str(source_id)])
+        record_cmd.append("-")
+
+        play_cmd = [
+            "pw-cat",
+            "--playback",
+            f"--rate={rate}",
+            f"--channels={channels}",
+        ]
+        if sink_id is not None:
+            play_cmd.extend(["--target", str(sink_id)])
+        play_cmd.append("-")
+
+        bytes_per_sample = 2  # s16le
+        bytes_per_chunk = chunk * channels * bytes_per_sample
+        epsilon = 1e-8
+        meter_bar_width = 30
+        last_meter_update = time.monotonic()
+
+        print("Opening PipeWire streams (default source/sink)...")
+
+        record_proc = subprocess.Popen(
+            record_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        play_proc = subprocess.Popen(
+            play_cmd,
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        if not record_proc.stdout or not play_proc.stdin:
+            raise RuntimeError("Failed to open pw-cat streams.")
+
+        try:
+            print("Real-time conversion streams opened successfully!")
+            print("Recording and converting via PipeWire (Ctrl+C to stop)")
+            if show_meter:
+                print("Microphone level meter active (updates every "
+                      f"{meter_refresh:.1f}s)")
+
+            while True:
+                chunk_bytes = record_proc.stdout.read(bytes_per_chunk)
+                if not chunk_bytes:
+                    # End of stream; give pw-cat time to flush stderr
+                    time.sleep(0.05)
+                    err = record_proc.stderr.read().decode() if record_proc.stderr else ""
+                    raise RuntimeError(f"pw-cat ended unexpectedly.\n{err}")
+
+                audio_array = np.frombuffer(chunk_bytes, dtype=np.int16).astype(np.float32)
+                audio_array /= 32768.0
+
+                if show_meter:
+                    now = time.monotonic()
+                    if now - last_meter_update >= meter_refresh:
+                        rms = float(np.sqrt(np.mean(np.square(audio_array))))
+                        meter_level = min(rms / 0.2, 1.0)
+                        filled = int(meter_level * meter_bar_width)
+                        bar = "#" * filled + "." * (meter_bar_width - filled)
+                        db = 20 * np.log10(max(rms, epsilon))
+                        sys.stdout.write(f"\rMic level [{bar}] {db:6.1f} dBFS")
+                        sys.stdout.flush()
+                        last_meter_update = now
+
+                # Placeholder processing (pass-through with slight gain)
+                processed = np.clip(audio_array * 1.1, -1.0, 1.0)
+                output_bytes = (processed * 32767.0).astype(np.int16).tobytes()
+
+                play_proc.stdin.write(output_bytes)
+
+        except KeyboardInterrupt:
+            print("\nReal-time conversion stopped by user.")
+        except Exception as exc:
+            print(f"\nError during PipeWire streaming: {exc}")
+        finally:
+            if show_meter:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+
+            if record_proc.stdout:
+                record_proc.stdout.close()
+            if play_proc.stdin:
+                play_proc.stdin.close()
+
+            record_proc.terminate()
+            play_proc.terminate()
+
+            # Drain stderr for debugging
+            for proc, label in [(record_proc, "record"), (play_proc, "playback")]:
+                try:
+                    if proc.stderr:
+                        err = proc.stderr.read().decode().strip()
+                        if err:
+                            print(f"[pw-cat {label} stderr] {err}")
+                except Exception:
+                    pass
