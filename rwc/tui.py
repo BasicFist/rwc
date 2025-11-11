@@ -35,6 +35,12 @@ except ImportError:
     Fore = ColorsFallback()
     Style = ColorsFallback()
 
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+
 from rwc.core import VoiceConverter
 from rwc.utils.audio_devices import list_audio_devices
 
@@ -318,9 +324,10 @@ def main_tui():
 📊 System Information:""", Fore.YELLOW)
                 
                 # Display system info
-                print_colored(f"   • CUDA Available: {bool(__import__('torch').cuda.is_available())}", Fore.CYAN)
-                if __import__('torch').cuda.is_available():
-                    gpu_name = __import__('torch').cuda.get_device_name(0)
+                if TORCH_AVAILABLE:
+                    print_colored(f"   • CUDA Available: {torch.cuda.is_available()}", Fore.CYAN)
+                    if torch.cuda.is_available():
+                        gpu_name = torch.cuda.get_device_name(0)
                     print_colored(f"   • GPU: {gpu_name}", Fore.CYAN)
                 
                 print_colored(f"   • Total Models: {len(list_available_models())}", Fore.CYAN)

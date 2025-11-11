@@ -272,9 +272,41 @@ class VoiceConverter:
     ):
         """
         PipeWire-based real-time loop using pw-cat for capture/playback.
+
+        Args:
+            rate: Sample rate in Hz
+            channels: Number of audio channels
+            chunk: Buffer size
+            show_meter: Whether to show audio level meter
+            meter_refresh: Meter refresh rate in seconds
+            source_id: PipeWire source node ID (integer only)
+            sink_id: PipeWire sink node ID (integer only)
+
+        Raises:
+            ValueError: If parameters are invalid
         """
         import numpy as np
+        from rwc.utils.validation import (
+            validate_pipewire_device_id,
+            validate_sample_rate,
+            validate_channels,
+            ValidationError
+        )
 
+        # Validate inputs to prevent command injection
+        try:
+            rate = validate_sample_rate(rate)
+            channels = validate_channels(channels)
+            source_id = validate_pipewire_device_id(source_id)
+            sink_id = validate_pipewire_device_id(sink_id)
+        except ValidationError as e:
+            raise ValueError(f"Invalid parameter: {e}")
+
+        # Validate chunk size
+        if not isinstance(chunk, int) or chunk < 64 or chunk > 8192:
+            raise ValueError(f"Invalid chunk size: {chunk} (must be 64-8192)")
+
+        # Build command with validated parameters (safe from injection)
         record_cmd = [
             "pw-cat",
             "--record",
@@ -282,6 +314,7 @@ class VoiceConverter:
             f"--channels={channels}",
         ]
         if source_id is not None:
+            # Safe: source_id is validated integer
             record_cmd.extend(["--target", str(source_id)])
         record_cmd.append("-")
 
@@ -292,6 +325,7 @@ class VoiceConverter:
             f"--channels={channels}",
         ]
         if sink_id is not None:
+            # Safe: sink_id is validated integer
             play_cmd.extend(["--target", str(sink_id)])
         play_cmd.append("-")
 

@@ -2,6 +2,9 @@
 RWC API endpoints for voice conversion
 """
 import os
+import tempfile
+import contextlib
+from pathlib import Path
 import torch
 from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
@@ -19,13 +22,40 @@ def allowed_file(filename):
     """Check if the uploaded file has an allowed extension"""
     return os.path.splitext(filename)[1].lower() in ALLOWED_EXTENSIONS
 
-def sanitize_path(path):
-    """Sanitize file paths to prevent directory traversal attacks"""
-    # Remove any '..' or other dangerous patterns
-    path = os.path.normpath(path)
-    if path.startswith('/') or '..' in path:
-        raise ValueError("Invalid path")
-    return path
+def sanitize_path(path, base_dir="models"):
+    """
+    Sanitize file paths to prevent directory traversal attacks.
+
+    Args:
+        path: User-provided path (relative or absolute)
+        base_dir: Allowed base directory (default: "models")
+
+    Returns:
+        str: Validated absolute path
+
+    Raises:
+        ValueError: If path attempts to escape base_dir
+    """
+    # Get absolute paths
+    base_dir_abs = Path(base_dir).resolve()
+
+    # Resolve the requested path (follows symlinks, resolves ..)
+    try:
+        requested_path = (base_dir_abs / path).resolve()
+    except (ValueError, OSError) as e:
+        raise ValueError(f"Invalid path: {e}")
+
+    # Verify the resolved path is within base_dir
+    try:
+        requested_path.relative_to(base_dir_abs)
+    except ValueError:
+        raise ValueError(f"Path escapes base directory: {path}")
+
+    # Check if path exists (optional but recommended)
+    if not requested_path.exists():
+        raise ValueError(f"Path does not exist: {path}")
+
+    return str(requested_path)
 
 # Global converter instance (in a real app, you'd want proper resource management)
 converter = None
@@ -60,8 +90,14 @@ def convert_voice():
         return jsonify({"error": f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
     
     model_path = request.form.get('model_path')
-    if not model_path or not os.path.exists(sanitize_path(model_path)):
-        return jsonify({"error": "Valid model path required"}), 400
+    if not model_path:
+        return jsonify({"error": "Model path required"}), 400
+
+    # Validate and sanitize model path
+    try:
+        model_path = sanitize_path(model_path, base_dir="models")
+    except ValueError as e:
+        return jsonify({"error": f"Invalid model path: {str(e)}"}), 400
     
     try:
         pitch_change = int(request.form.get('pitch_change', 0))
@@ -83,35 +119,73 @@ def convert_voice():
     
     # Initialize converter if not already done
     if converter is None or converter.model_path != model_path:
-        converter = VoiceConverter(model_path, use_rmvpe=use_rmvpe)
-    
-    # Save uploaded file temporarily with secure filename
+        try:
+            converter = VoiceConverter(model_path, use_rmvpe=use_rmvpe)
+        except Exception as e:
+            return jsonify({"error": "Failed to initialize converter"}), 500
+
+    # Use secure temporary files with automatic cleanup
     filename = secure_filename(audio_file.filename)
-    input_path = os.path.join("/tmp", f"rwc_input_{id(audio_file)}_{filename}")
-    audio_file.save(input_path)
-    
-    # Generate output path
-    output_path = os.path.join("/tmp", f"rwc_output_{id(audio_file)}_{os.path.splitext(filename)[0]}.wav")
-    
+
+    # Create temporary file for input
+    with tempfile.NamedTemporaryFile(
+        mode='wb',
+        suffix=os.path.splitext(filename)[1],
+        prefix='rwc_input_',
+        delete=False
+    ) as input_tmp:
+        input_path = input_tmp.name
+        audio_file.save(input_path)
+
+    # Create temporary file for output
+    with tempfile.NamedTemporaryFile(
+        mode='wb',
+        suffix='.wav',
+        prefix='rwc_output_',
+        delete=False
+    ) as output_tmp:
+        output_path = output_tmp.name
+
     try:
         # Perform conversion
         result_path = converter.convert_voice(
-            input_path, 
-            output_path, 
+            input_path,
+            output_path,
             pitch_change=pitch_change,
             index_rate=index_rate
         )
-        
-        return send_file(result_path, as_attachment=True)
-    
+
+        # Send file and schedule cleanup
+        @contextlib.contextmanager
+        def cleanup_after_send():
+            try:
+                yield
+            finally:
+                # Cleanup after sending
+                for path in [input_path, output_path]:
+                    try:
+                        if os.path.exists(path):
+                            os.remove(path)
+                    except OSError:
+                        pass  # Best effort cleanup
+
+        with cleanup_after_send():
+            return send_file(
+                result_path,
+                as_attachment=True,
+                download_name=f"converted_{os.path.basename(result_path)}"
+            )
+
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    
-    finally:
-        # Clean up temporary files
+        # Ensure cleanup even on error
         for path in [input_path, output_path]:
-            if os.path.exists(path):
-                os.remove(path)
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+
+        return jsonify({"error": "Conversion failed"}), 500
 
 @app.route('/models', methods=['GET'])
 def list_models():
@@ -134,4 +208,14 @@ def home():
     })
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Never enable debug in production
+    debug_mode = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+
+    if debug_mode:
+        print("⚠️  WARNING: Running in DEBUG mode. Do NOT use in production!")
+
+    app.run(
+        host=os.getenv('FLASK_HOST', '127.0.0.1'),  # Bind to localhost by default
+        port=int(os.getenv('FLASK_PORT', 5000)),
+        debug=debug_mode
+    )
