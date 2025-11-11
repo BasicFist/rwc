@@ -35,6 +35,9 @@ SUPPORTED_AUDIO_EXTENSIONS: Set[str] = {
     '.aac', '.ogg', '.opus'
 }
 
+# Alias for backwards compatibility with API
+ALLOWED_EXTENSIONS = SUPPORTED_AUDIO_EXTENSIONS
+
 # Model Formats
 SUPPORTED_MODEL_EXTENSIONS: Set[str] = {
     '.pth', '.pt', '.onnx'

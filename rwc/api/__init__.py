@@ -9,14 +9,22 @@ import torch
 from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 from rwc.core import VoiceConverter
+from rwc.utils.logging_config import get_logger
+from rwc.utils.constants import (
+    MAX_AUDIO_FILE_SIZE,
+    ALLOWED_EXTENSIONS,
+    ERROR_MESSAGES,
+)
+
+logger = get_logger(__name__)
 
 app = Flask(__name__)
 
 # Configure upload settings
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
+app.config['MAX_CONTENT_LENGTH'] = MAX_AUDIO_FILE_SIZE
 
-# Allowed audio file extensions
-ALLOWED_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.aac', '.ogg'}
+# Allowed audio file extensions (imported from constants)
+# ALLOWED_EXTENSIONS is now imported from constants module
 
 def allowed_file(filename):
     """Check if the uploaded file has an allowed extension"""
@@ -60,10 +68,43 @@ def sanitize_path(path, base_dir="models"):
 # Global converter instance (in a real app, you'd want proper resource management)
 converter = None
 
+def sanitize_error_message(error: Exception, show_details: bool = False) -> str:
+    """
+    Sanitize error messages to prevent information disclosure.
+
+    Args:
+        error: Exception that occurred
+        show_details: Whether to show detailed error (debug mode only)
+
+    Returns:
+        Sanitized error message string
+    """
+    if show_details:
+        return str(error)
+
+    # Map specific error types to generic messages
+    error_type = type(error).__name__
+
+    generic_messages = {
+        'FileNotFoundError': 'Resource not found',
+        'PermissionError': 'Access denied',
+        'ValueError': 'Invalid input provided',
+        'RuntimeError': 'Operation failed',
+        'OSError': 'System error occurred',
+        'IOError': 'File operation failed',
+    }
+
+    return generic_messages.get(error_type, 'An error occurred')
+
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({"status": "healthy", "gpu_available": True if torch.cuda.is_available() else False})
+    logger.debug("Health check requested")
+    return jsonify({
+        "status": "healthy",
+        "gpu_available": torch.cuda.is_available()
+    })
 
 @app.route('/convert', methods=['POST'])
 def convert_voice():
@@ -120,9 +161,16 @@ def convert_voice():
     # Initialize converter if not already done
     if converter is None or converter.model_path != model_path:
         try:
+            logger.info(f"Initializing converter with model: {Path(model_path).name}")
             converter = VoiceConverter(model_path, use_rmvpe=use_rmvpe)
+        except FileNotFoundError as e:
+            logger.error(f"Model not found: {model_path}")
+            return jsonify({"error": "Model file not found"}), 404
         except Exception as e:
-            return jsonify({"error": "Failed to initialize converter"}), 500
+            logger.error(f"Converter initialization failed", exc_info=True)
+            is_debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+            error_msg = sanitize_error_message(e, show_details=is_debug)
+            return jsonify({"error": error_msg}), 500
 
     # Use secure temporary files with automatic cleanup
     filename = secure_filename(audio_file.filename)
@@ -148,12 +196,15 @@ def convert_voice():
 
     try:
         # Perform conversion
+        logger.info(f"Starting conversion: {Path(input_path).name}")
         result_path = converter.convert_voice(
             input_path,
             output_path,
             pitch_change=pitch_change,
             index_rate=index_rate
         )
+
+        logger.info(f"Conversion successful: {Path(result_path).name}")
 
         # Send file and schedule cleanup
         @contextlib.contextmanager
@@ -166,8 +217,9 @@ def convert_voice():
                     try:
                         if os.path.exists(path):
                             os.remove(path)
-                    except OSError:
-                        pass  # Best effort cleanup
+                            logger.debug(f"Cleaned up: {path}")
+                    except OSError as e:
+                        logger.warning(f"Cleanup failed for {path}: {e}")
 
         with cleanup_after_send():
             return send_file(
@@ -176,7 +228,32 @@ def convert_voice():
                 download_name=f"converted_{os.path.basename(result_path)}"
             )
 
+    except FileNotFoundError as e:
+        logger.error(f"File not found during conversion: {e}")
+        # Ensure cleanup even on error
+        for path in [input_path, output_path]:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+        return jsonify({"error": "File not found"}), 404
+
+    except ValueError as e:
+        logger.error(f"Invalid input during conversion: {e}")
+        # Ensure cleanup even on error
+        for path in [input_path, output_path]:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+        is_debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+        error_msg = sanitize_error_message(e, show_details=is_debug)
+        return jsonify({"error": error_msg}), 400
+
     except Exception as e:
+        logger.error(f"Conversion failed", exc_info=True)
         # Ensure cleanup even on error
         for path in [input_path, output_path]:
             try:
@@ -185,7 +262,9 @@ def convert_voice():
             except OSError:
                 pass
 
-        return jsonify({"error": "Conversion failed"}), 500
+        is_debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+        error_msg = sanitize_error_message(e, show_details=is_debug)
+        return jsonify({"error": error_msg}), 500
 
 @app.route('/models', methods=['GET'])
 def list_models():
