@@ -35,6 +35,9 @@ ENV/
 *.swp
 *.swo
 
+# MCP tooling
+.serena/
+
 # OS
 .DS_Store
 Thumbs.db
