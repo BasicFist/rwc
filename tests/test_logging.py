@@ -103,9 +103,9 @@ class TestLoggingHelpers:
 
     def test_log_function_call(self, caplog):
         """Should log function calls with parameters"""
-        logger = setup_logging('test_func_call', level='DEBUG')
+        logger = setup_logging('test_func_call', level='DEBUG', propagate=True)
 
-        with caplog.at_level(logging.DEBUG):
+        with caplog.at_level(logging.DEBUG, logger='test_func_call'):
             log_function_call(logger, 'test_function', param1='value1', param2=42)
 
         assert 'test_function' in caplog.text
@@ -114,9 +114,9 @@ class TestLoggingHelpers:
 
     def test_log_performance(self, caplog):
         """Should log performance metrics"""
-        logger = setup_logging('test_perf', level='INFO')
+        logger = setup_logging('test_perf', level='INFO', propagate=True)
 
-        with caplog.at_level(logging.INFO):
+        with caplog.at_level(logging.INFO, logger='test_perf'):
             log_performance(logger, 'test_operation', 1.234)
 
         assert 'Performance' in caplog.text
@@ -125,12 +125,12 @@ class TestLoggingHelpers:
 
     def test_log_error_with_context(self, caplog):
         """Should log errors with context and stack trace"""
-        logger = setup_logging('test_error', level='ERROR')
+        logger = setup_logging('test_error', level='ERROR', propagate=True)
 
         try:
             raise ValueError("Test error")
         except ValueError as e:
-            with caplog.at_level(logging.ERROR):
+            with caplog.at_level(logging.ERROR, logger='test_error'):
                 log_error_with_context(logger, e, "During test operation")
 
         assert 'During test operation' in caplog.text
@@ -176,9 +176,9 @@ class TestLogFormatting:
 
     def test_console_format_simple(self, caplog):
         """Console logs should have simple format"""
-        logger = setup_logging('test_console', level='INFO')
+        logger = setup_logging('test_console', level='INFO', propagate=True)
 
-        with caplog.at_level(logging.INFO):
+        with caplog.at_level(logging.INFO, logger='test_console'):
             logger.info("Test message")
 
         # Simple format: timestamp - level - message

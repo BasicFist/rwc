@@ -23,7 +23,8 @@ def setup_logging(
     name: str = 'rwc',
     level: Optional[str] = None,
     log_file: Optional[str] = None,
-    console: bool = True
+    console: bool = True,
+    propagate: bool = False
 ) -> logging.Logger:
     """
     Setup logging configuration for RWC.
@@ -33,6 +34,7 @@ def setup_logging(
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         log_file: Optional path to log file
         console: Whether to log to console (default: True)
+        propagate: Whether to propagate to parent logger (default: False, set True for testing)
 
     Returns:
         Configured logger instance
@@ -82,8 +84,8 @@ def setup_logging(
         file_handler.setFormatter(detailed_formatter)
         logger.addHandler(file_handler)
 
-    # Prevent propagation to root logger
-    logger.propagate = False
+    # Control propagation to root logger (disabled by default, enabled for testing)
+    logger.propagate = propagate
 
     return logger
 
