@@ -8,43 +8,83 @@ import time
 import torch
 import librosa
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 import configparser
 import shutil
 import subprocess
+from pathlib import Path
+
+from rwc.utils.logging_config import get_logger
+from rwc.utils.constants import (
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_CHANNELS,
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_PITCH_CHANGE,
+    DEFAULT_INDEX_RATE,
+    METER_BAR_WIDTH,
+    METER_MAX_RMS,
+    METER_EPSILON,
+    MIN_CHUNK_SIZE,
+    MAX_CHUNK_SIZE,
+    ERROR_MESSAGES,
+    LOG_MESSAGES,
+)
+
+logger = get_logger(__name__)
 
 class VoiceConverter:
     """
     Core voice conversion class based on RVC framework
     """
-    def __init__(self, model_path: str, config_path: Optional[str] = None, use_rmvpe: Optional[bool] = None):
+    def __init__(
+        self,
+        model_path: str,
+        config_path: Optional[str] = None,
+        use_rmvpe: Optional[bool] = None
+    ) -> None:
         """
         Initialize the voice converter with a model
-        
+
         Args:
             model_path: Path to the RVC model file (.pth)
             config_path: Optional path to config file
             use_rmvpe: Whether to use RMVPE for pitch extraction (more accurate)
+
+        Raises:
+            FileNotFoundError: If model file doesn't exist
+            RuntimeError: If model loading fails
         """
+        logger.info(f"Initializing VoiceConverter with model: {model_path}")
+
         self.model_path = model_path
         self.config_path = config_path or 'rwc/config.ini'
         self.config = self._load_config()
-        
+
         # Use parameter if provided, otherwise use config default
         self.use_rmvpe = use_rmvpe if use_rmvpe is not None else self.config.getboolean('CONVERSION', 'use_rmvpe_by_default', fallback=True)
-        
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = None
-        self.hubert_model = None
-        self.rmvpe_model = None
-        
+        logger.info(f"Using device: {self.device}")
+
+        if not torch.cuda.is_available():
+            logger.warning(ERROR_MESSAGES['cuda_not_available'])
+
+        self.model: Optional[Any] = None
+        self.hubert_model: Optional[Any] = None
+        self.rmvpe_model: Optional[Any] = None
+
         # Initialize models
         self._load_models()
+        logger.info(LOG_MESSAGES['model_loaded'].format(model=Path(model_path).name))
     
-    def _load_config(self):
+    def _load_config(self) -> configparser.ConfigParser:
         """
         Load configuration from config file
+
+        Returns:
+            ConfigParser instance with loaded configuration
         """
+        logger.debug(f"Loading configuration from {self.config_path}")
         config = configparser.ConfigParser()
         
         # Read default config first
@@ -96,41 +136,227 @@ class VoiceConverter:
             print(f"RMVPE model not found at {rmvpe_path}, falling back to built-in pitch extraction")
             self.use_rmvpe = False
     
-    def convert_voice(self, input_audio_path: str, output_audio_path: str, 
+    def convert_voice(self, input_audio_path: str, output_audio_path: str,
                      pitch_change: Optional[int] = None, index_rate: Optional[float] = None) -> str:
         """
-        Convert voice from input audio to target speaker
-        
+        Convert voice from input audio to target speaker using RVC
+
         Args:
             input_audio_path: Path to input audio file
             output_audio_path: Path to save output audio file
             pitch_change: Pitch change in semitones (uses config default if not specified)
             index_rate: How much to use the feature index (0.0-1.0) (uses config default if not specified)
-        
+
         Returns:
             Path to the output audio file
+
+        Raises:
+            FileNotFoundError: If input audio file doesn't exist
+            ValueError: If parameters are invalid
+            RuntimeError: If conversion fails
         """
-        # Use config defaults if parameters not provided
-        default_pitch_change = self.config.getint('CONVERSION', 'default_pitch_change', fallback=0)
-        pitch_change = pitch_change if pitch_change is not None else default_pitch_change
-        
-        default_index_rate = self.config.getfloat('CONVERSION', 'default_index_rate', fallback=0.75)
-        index_rate = index_rate if index_rate is not None else default_index_rate
-        
-        print(f"Converting voice: {input_audio_path} -> {output_audio_path}")
-        print(f"Using {'RMVPE' if self.use_rmvpe else 'default'} pitch extraction")
-        print(f"Pitch change: {pitch_change}, Index rate: {index_rate}")
-        
-        # Placeholder for actual voice conversion logic
-        # In a real implementation, this would:
-        # 1. Load the input audio
-        # 2. Extract features using the loaded models
-        # 3. Apply voice conversion using RVC techniques
-        # 4. Generate output audio
-        # 5. Save the output
-        
-        # For now, just return the output path
-        return output_audio_path
+        from rwc.utils.validation import (
+            validate_audio_file_path,
+            validate_pitch_change,
+            validate_index_rate,
+            ValidationError
+        )
+
+        logger = get_logger(__name__)
+
+        # Validate inputs
+        try:
+            input_path = validate_audio_file_path(input_audio_path)
+            output_path = validate_audio_file_path(output_audio_path, must_exist=False)
+
+            # Use config defaults if parameters not provided
+            default_pitch_change = self.config.getint('CONVERSION', 'default_pitch_change', fallback=0)
+            pitch_change = pitch_change if pitch_change is not None else default_pitch_change
+            pitch_change = validate_pitch_change(pitch_change)
+
+            default_index_rate = self.config.getfloat('CONVERSION', 'default_index_rate', fallback=0.75)
+            index_rate = index_rate if index_rate is not None else default_index_rate
+            index_rate = validate_index_rate(index_rate)
+
+        except ValidationError as e:
+            logger.error(f"Validation error: {e}")
+            raise ValueError(f"Invalid input: {e}")
+
+        logger.info(f"Converting voice: {input_path.name} -> {output_path.name}")
+        logger.debug(f"Pitch change: {pitch_change}, Index rate: {index_rate}")
+        logger.debug(f"Using {'RMVPE' if self.use_rmvpe else 'default'} pitch extraction")
+
+        try:
+            # Step 1: Load input audio
+            logger.debug(f"Loading audio from {input_path}")
+            audio_data, sample_rate = librosa.load(
+                str(input_path),
+                sr=DEFAULT_SAMPLE_RATE,
+                mono=True
+            )
+            logger.debug(f"Loaded audio: {len(audio_data)} samples @ {sample_rate}Hz")
+
+            # Step 2: Extract features using HuBERT
+            logger.debug("Extracting audio features with HuBERT")
+            # TODO: Implement HuBERT feature extraction
+            # This requires the RVC-Project's HuBERT model and feature extractor
+            # Expected output: feature vector of shape (time_steps, feature_dim)
+            features = self._extract_features_placeholder(audio_data, sample_rate)
+
+            # Step 3: Extract pitch using RMVPE or fallback method
+            logger.debug(f"Extracting pitch {'with RMVPE' if self.use_rmvpe else 'with fallback'}")
+            # TODO: Implement pitch extraction
+            # RMVPE provides more accurate pitch tracking than traditional methods
+            # Expected output: f0 curve (fundamental frequency over time)
+            f0_curve = self._extract_pitch_placeholder(audio_data, sample_rate)
+
+            # Step 4: Apply pitch shift if requested
+            if pitch_change != 0:
+                logger.debug(f"Applying pitch shift: {pitch_change} semitones")
+                f0_curve = self._apply_pitch_shift(f0_curve, pitch_change)
+
+            # Step 5: Apply RVC voice conversion
+            logger.debug("Applying RVC voice conversion")
+            # TODO: Implement RVC inference
+            # This is the core RVC algorithm that:
+            # 1. Uses the loaded RVC model to convert features
+            # 2. Applies feature index for speaker similarity (controlled by index_rate)
+            # 3. Combines with pitch information
+            # Expected output: converted audio waveform
+            converted_audio = self._rvc_inference_placeholder(
+                features, f0_curve, index_rate
+            )
+
+            # Step 6: Save output audio
+            logger.debug(f"Saving converted audio to {output_path}")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            import soundfile as sf
+            sf.write(
+                str(output_path),
+                converted_audio,
+                samplerate=sample_rate,
+                subtype='PCM_16'
+            )
+
+            logger.info(f"Conversion completed: {output_path}")
+            return str(output_path)
+
+        except FileNotFoundError as e:
+            logger.error(f"File not found: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Conversion failed: {e}", exc_info=True)
+            raise RuntimeError(f"Voice conversion failed: {e}")
+
+    def _extract_features_placeholder(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+        """
+        Placeholder for HuBERT feature extraction
+
+        TODO: Implement actual HuBERT feature extraction from RVC-Project
+        This requires:
+        1. Loading the HuBERT model (hubert_base.pt)
+        2. Preprocessing audio to HuBERT's expected format
+        3. Running inference to extract features
+        4. Post-processing features for RVC
+
+        Args:
+            audio_data: Audio waveform
+            sample_rate: Sample rate
+
+        Returns:
+            Feature array of shape (time_steps, feature_dim)
+        """
+        logger = get_logger(__name__)
+        logger.warning("Using placeholder feature extraction - RVC features not implemented")
+
+        # Return dummy features with correct shape
+        # Real HuBERT features are typically 256-dimensional
+        time_steps = len(audio_data) // 320  # Rough estimate
+        return np.zeros((time_steps, 256), dtype=np.float32)
+
+    def _extract_pitch_placeholder(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+        """
+        Placeholder for pitch extraction
+
+        TODO: Implement RMVPE pitch extraction for accurate f0 tracking
+        Fallback to librosa's pyin or other methods when RMVPE unavailable
+
+        Args:
+            audio_data: Audio waveform
+            sample_rate: Sample rate
+
+        Returns:
+            F0 curve array
+        """
+        logger = get_logger(__name__)
+
+        if self.use_rmvpe:
+            logger.warning("Using placeholder pitch extraction - RMVPE not implemented")
+            # TODO: Implement RMVPE pitch extraction
+        else:
+            logger.debug("Using basic pitch extraction")
+
+        # Use librosa as temporary fallback
+        f0, voiced_flag, voiced_probs = librosa.pyin(
+            audio_data,
+            fmin=librosa.note_to_hz('C2'),
+            fmax=librosa.note_to_hz('C7'),
+            sr=sample_rate
+        )
+
+        # Fill unvoiced regions with zeros
+        f0 = np.nan_to_num(f0, nan=0.0)
+        return f0
+
+    def _apply_pitch_shift(self, f0_curve: np.ndarray, semitones: int) -> np.ndarray:
+        """
+        Apply pitch shift to f0 curve
+
+        Args:
+            f0_curve: Original f0 curve
+            semitones: Pitch shift in semitones
+
+        Returns:
+            Shifted f0 curve
+        """
+        # Pitch shift formula: f_new = f_old * 2^(semitones/12)
+        shift_ratio = 2.0 ** (semitones / 12.0)
+        return f0_curve * shift_ratio
+
+    def _rvc_inference_placeholder(
+        self, features: np.ndarray, f0_curve: np.ndarray, index_rate: float
+    ) -> np.ndarray:
+        """
+        Placeholder for RVC inference
+
+        TODO: Implement actual RVC inference from RVC-Project
+        This is the core voice conversion algorithm that:
+        1. Takes extracted features and pitch information
+        2. Uses the loaded RVC model to convert to target voice
+        3. Applies feature index for speaker similarity
+        4. Synthesizes output audio with vocoder
+
+        Args:
+            features: Extracted HuBERT features
+            f0_curve: Pitch curve
+            index_rate: How much to use feature index (0.0-1.0)
+
+        Returns:
+            Converted audio waveform
+        """
+        logger = get_logger(__name__)
+        logger.error("RVC inference not implemented - this is a placeholder")
+
+        raise NotImplementedError(
+            "RVC inference is not yet implemented. "
+            "To implement this, you need to:\n"
+            "1. Integrate the RVC-Project codebase\n"
+            "2. Load the trained RVC model (.pth file)\n"
+            "3. Implement the RVC inference pipeline\n"
+            "4. Integrate the vocoder for audio synthesis\n"
+            "See: https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI"
+        )
     
     def real_time_convert(
         self,
@@ -272,9 +498,41 @@ class VoiceConverter:
     ):
         """
         PipeWire-based real-time loop using pw-cat for capture/playback.
+
+        Args:
+            rate: Sample rate in Hz
+            channels: Number of audio channels
+            chunk: Buffer size
+            show_meter: Whether to show audio level meter
+            meter_refresh: Meter refresh rate in seconds
+            source_id: PipeWire source node ID (integer only)
+            sink_id: PipeWire sink node ID (integer only)
+
+        Raises:
+            ValueError: If parameters are invalid
         """
         import numpy as np
+        from rwc.utils.validation import (
+            validate_pipewire_device_id,
+            validate_sample_rate,
+            validate_channels,
+            ValidationError
+        )
 
+        # Validate inputs to prevent command injection
+        try:
+            rate = validate_sample_rate(rate)
+            channels = validate_channels(channels)
+            source_id = validate_pipewire_device_id(source_id)
+            sink_id = validate_pipewire_device_id(sink_id)
+        except ValidationError as e:
+            raise ValueError(f"Invalid parameter: {e}")
+
+        # Validate chunk size
+        if not isinstance(chunk, int) or chunk < 64 or chunk > 8192:
+            raise ValueError(f"Invalid chunk size: {chunk} (must be 64-8192)")
+
+        # Build command with validated parameters (safe from injection)
         record_cmd = [
             "pw-cat",
             "--record",
@@ -282,6 +540,7 @@ class VoiceConverter:
             f"--channels={channels}",
         ]
         if source_id is not None:
+            # Safe: source_id is validated integer
             record_cmd.extend(["--target", str(source_id)])
         record_cmd.append("-")
 
@@ -292,6 +551,7 @@ class VoiceConverter:
             f"--channels={channels}",
         ]
         if sink_id is not None:
+            # Safe: sink_id is validated integer
             play_cmd.extend(["--target", str(sink_id)])
         play_cmd.append("-")
 

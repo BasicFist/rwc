@@ -4,7 +4,6 @@ RWC Command Line Interface
 import click
 import os
 from rwc.core import VoiceConverter
-import os
 
 
 @click.group()
@@ -64,7 +63,6 @@ def serve_webui(port):
     
     # Import here to avoid circular dependencies
     from rwc import webui
-    import os
     import sys
     
     # Change to the rwc directory for proper relative imports

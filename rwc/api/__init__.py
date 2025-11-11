@@ -2,38 +2,109 @@
 RWC API endpoints for voice conversion
 """
 import os
+import tempfile
+import contextlib
+from pathlib import Path
 import torch
 from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 from rwc.core import VoiceConverter
+from rwc.utils.logging_config import get_logger
+from rwc.utils.constants import (
+    MAX_AUDIO_FILE_SIZE,
+    ALLOWED_EXTENSIONS,
+    ERROR_MESSAGES,
+)
+
+logger = get_logger(__name__)
 
 app = Flask(__name__)
 
 # Configure upload settings
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
+app.config['MAX_CONTENT_LENGTH'] = MAX_AUDIO_FILE_SIZE
 
-# Allowed audio file extensions
-ALLOWED_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.aac', '.ogg'}
+# Allowed audio file extensions (imported from constants)
+# ALLOWED_EXTENSIONS is now imported from constants module
 
 def allowed_file(filename):
     """Check if the uploaded file has an allowed extension"""
     return os.path.splitext(filename)[1].lower() in ALLOWED_EXTENSIONS
 
-def sanitize_path(path):
-    """Sanitize file paths to prevent directory traversal attacks"""
-    # Remove any '..' or other dangerous patterns
-    path = os.path.normpath(path)
-    if path.startswith('/') or '..' in path:
-        raise ValueError("Invalid path")
-    return path
+def sanitize_path(path, base_dir="models"):
+    """
+    Sanitize file paths to prevent directory traversal attacks.
+
+    Args:
+        path: User-provided path (relative or absolute)
+        base_dir: Allowed base directory (default: "models")
+
+    Returns:
+        str: Validated absolute path
+
+    Raises:
+        ValueError: If path attempts to escape base_dir
+    """
+    # Get absolute paths
+    base_dir_abs = Path(base_dir).resolve()
+
+    # Resolve the requested path (follows symlinks, resolves ..)
+    try:
+        requested_path = (base_dir_abs / path).resolve()
+    except (ValueError, OSError) as e:
+        raise ValueError(f"Invalid path: {e}")
+
+    # Verify the resolved path is within base_dir
+    try:
+        requested_path.relative_to(base_dir_abs)
+    except ValueError:
+        raise ValueError(f"Path escapes base directory: {path}")
+
+    # Check if path exists (optional but recommended)
+    if not requested_path.exists():
+        raise ValueError(f"Path does not exist: {path}")
+
+    return str(requested_path)
 
 # Global converter instance (in a real app, you'd want proper resource management)
 converter = None
 
+def sanitize_error_message(error: Exception, show_details: bool = False) -> str:
+    """
+    Sanitize error messages to prevent information disclosure.
+
+    Args:
+        error: Exception that occurred
+        show_details: Whether to show detailed error (debug mode only)
+
+    Returns:
+        Sanitized error message string
+    """
+    if show_details:
+        return str(error)
+
+    # Map specific error types to generic messages
+    error_type = type(error).__name__
+
+    generic_messages = {
+        'FileNotFoundError': 'Resource not found',
+        'PermissionError': 'Access denied',
+        'ValueError': 'Invalid input provided',
+        'RuntimeError': 'Operation failed',
+        'OSError': 'System error occurred',
+        'IOError': 'File operation failed',
+    }
+
+    return generic_messages.get(error_type, 'An error occurred')
+
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({"status": "healthy", "gpu_available": True if torch.cuda.is_available() else False})
+    logger.debug("Health check requested")
+    return jsonify({
+        "status": "healthy",
+        "gpu_available": torch.cuda.is_available()
+    })
 
 @app.route('/convert', methods=['POST'])
 def convert_voice():
@@ -60,8 +131,14 @@ def convert_voice():
         return jsonify({"error": f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
     
     model_path = request.form.get('model_path')
-    if not model_path or not os.path.exists(sanitize_path(model_path)):
-        return jsonify({"error": "Valid model path required"}), 400
+    if not model_path:
+        return jsonify({"error": "Model path required"}), 400
+
+    # Validate and sanitize model path
+    try:
+        model_path = sanitize_path(model_path, base_dir="models")
+    except ValueError as e:
+        return jsonify({"error": f"Invalid model path: {str(e)}"}), 400
     
     try:
         pitch_change = int(request.form.get('pitch_change', 0))
@@ -83,35 +160,111 @@ def convert_voice():
     
     # Initialize converter if not already done
     if converter is None or converter.model_path != model_path:
-        converter = VoiceConverter(model_path, use_rmvpe=use_rmvpe)
-    
-    # Save uploaded file temporarily with secure filename
+        try:
+            logger.info(f"Initializing converter with model: {Path(model_path).name}")
+            converter = VoiceConverter(model_path, use_rmvpe=use_rmvpe)
+        except FileNotFoundError as e:
+            logger.error(f"Model not found: {model_path}")
+            return jsonify({"error": "Model file not found"}), 404
+        except Exception as e:
+            logger.error(f"Converter initialization failed", exc_info=True)
+            is_debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+            error_msg = sanitize_error_message(e, show_details=is_debug)
+            return jsonify({"error": error_msg}), 500
+
+    # Use secure temporary files with automatic cleanup
     filename = secure_filename(audio_file.filename)
-    input_path = os.path.join("/tmp", f"rwc_input_{id(audio_file)}_{filename}")
-    audio_file.save(input_path)
-    
-    # Generate output path
-    output_path = os.path.join("/tmp", f"rwc_output_{id(audio_file)}_{os.path.splitext(filename)[0]}.wav")
-    
+
+    # Create temporary file for input
+    with tempfile.NamedTemporaryFile(
+        mode='wb',
+        suffix=os.path.splitext(filename)[1],
+        prefix='rwc_input_',
+        delete=False
+    ) as input_tmp:
+        input_path = input_tmp.name
+        audio_file.save(input_path)
+
+    # Create temporary file for output
+    with tempfile.NamedTemporaryFile(
+        mode='wb',
+        suffix='.wav',
+        prefix='rwc_output_',
+        delete=False
+    ) as output_tmp:
+        output_path = output_tmp.name
+
     try:
         # Perform conversion
+        logger.info(f"Starting conversion: {Path(input_path).name}")
         result_path = converter.convert_voice(
-            input_path, 
-            output_path, 
+            input_path,
+            output_path,
             pitch_change=pitch_change,
             index_rate=index_rate
         )
-        
-        return send_file(result_path, as_attachment=True)
-    
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    
-    finally:
-        # Clean up temporary files
+
+        logger.info(f"Conversion successful: {Path(result_path).name}")
+
+        # Send file and schedule cleanup
+        @contextlib.contextmanager
+        def cleanup_after_send():
+            try:
+                yield
+            finally:
+                # Cleanup after sending
+                for path in [input_path, output_path]:
+                    try:
+                        if os.path.exists(path):
+                            os.remove(path)
+                            logger.debug(f"Cleaned up: {path}")
+                    except OSError as e:
+                        logger.warning(f"Cleanup failed for {path}: {e}")
+
+        with cleanup_after_send():
+            return send_file(
+                result_path,
+                as_attachment=True,
+                download_name=f"converted_{os.path.basename(result_path)}"
+            )
+
+    except FileNotFoundError as e:
+        logger.error(f"File not found during conversion: {e}")
+        # Ensure cleanup even on error
         for path in [input_path, output_path]:
-            if os.path.exists(path):
-                os.remove(path)
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+        return jsonify({"error": "File not found"}), 404
+
+    except ValueError as e:
+        logger.error(f"Invalid input during conversion: {e}")
+        # Ensure cleanup even on error
+        for path in [input_path, output_path]:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+        is_debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+        error_msg = sanitize_error_message(e, show_details=is_debug)
+        return jsonify({"error": error_msg}), 400
+
+    except Exception as e:
+        logger.error(f"Conversion failed", exc_info=True)
+        # Ensure cleanup even on error
+        for path in [input_path, output_path]:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+
+        is_debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+        error_msg = sanitize_error_message(e, show_details=is_debug)
+        return jsonify({"error": error_msg}), 500
 
 @app.route('/models', methods=['GET'])
 def list_models():
@@ -134,4 +287,14 @@ def home():
     })
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Never enable debug in production
+    debug_mode = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+
+    if debug_mode:
+        print("⚠️  WARNING: Running in DEBUG mode. Do NOT use in production!")
+
+    app.run(
+        host=os.getenv('FLASK_HOST', '127.0.0.1'),  # Bind to localhost by default
+        port=int(os.getenv('FLASK_PORT', 5000)),
+        debug=debug_mode
+    )
