@@ -8,43 +8,83 @@ import time
 import torch
 import librosa
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 import configparser
 import shutil
 import subprocess
+from pathlib import Path
+
+from rwc.utils.logging_config import get_logger
+from rwc.utils.constants import (
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_CHANNELS,
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_PITCH_CHANGE,
+    DEFAULT_INDEX_RATE,
+    METER_BAR_WIDTH,
+    METER_MAX_RMS,
+    METER_EPSILON,
+    MIN_CHUNK_SIZE,
+    MAX_CHUNK_SIZE,
+    ERROR_MESSAGES,
+    LOG_MESSAGES,
+)
+
+logger = get_logger(__name__)
 
 class VoiceConverter:
     """
     Core voice conversion class based on RVC framework
     """
-    def __init__(self, model_path: str, config_path: Optional[str] = None, use_rmvpe: Optional[bool] = None):
+    def __init__(
+        self,
+        model_path: str,
+        config_path: Optional[str] = None,
+        use_rmvpe: Optional[bool] = None
+    ) -> None:
         """
         Initialize the voice converter with a model
-        
+
         Args:
             model_path: Path to the RVC model file (.pth)
             config_path: Optional path to config file
             use_rmvpe: Whether to use RMVPE for pitch extraction (more accurate)
+
+        Raises:
+            FileNotFoundError: If model file doesn't exist
+            RuntimeError: If model loading fails
         """
+        logger.info(f"Initializing VoiceConverter with model: {model_path}")
+
         self.model_path = model_path
         self.config_path = config_path or 'rwc/config.ini'
         self.config = self._load_config()
-        
+
         # Use parameter if provided, otherwise use config default
         self.use_rmvpe = use_rmvpe if use_rmvpe is not None else self.config.getboolean('CONVERSION', 'use_rmvpe_by_default', fallback=True)
-        
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = None
-        self.hubert_model = None
-        self.rmvpe_model = None
-        
+        logger.info(f"Using device: {self.device}")
+
+        if not torch.cuda.is_available():
+            logger.warning(ERROR_MESSAGES['cuda_not_available'])
+
+        self.model: Optional[Any] = None
+        self.hubert_model: Optional[Any] = None
+        self.rmvpe_model: Optional[Any] = None
+
         # Initialize models
         self._load_models()
+        logger.info(LOG_MESSAGES['model_loaded'].format(model=Path(model_path).name))
     
-    def _load_config(self):
+    def _load_config(self) -> configparser.ConfigParser:
         """
         Load configuration from config file
+
+        Returns:
+            ConfigParser instance with loaded configuration
         """
+        logger.debug(f"Loading configuration from {self.config_path}")
         config = configparser.ConfigParser()
         
         # Read default config first

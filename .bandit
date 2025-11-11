@@ -1,0 +1,19 @@
+# Bandit security linting configuration
+[bandit]
+exclude_dirs = [
+    '/venv/',
+    '/.venv/',
+    '/tests/',
+    '/test_*',
+    '/__pycache__/',
+    '/.pytest_cache/',
+]
+
+# Skip specific tests
+skips = []
+
+# Test levels (LOW, MEDIUM, HIGH)
+level = MEDIUM
+
+# Confidence levels (LOW, MEDIUM, HIGH)
+confidence = MEDIUM
