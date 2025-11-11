@@ -1,0 +1,49 @@
+# Git Aliases for RWC Project
+# Source this file or add to your ~/.gitconfig
+
+# Quick status and log
+alias gs='git status'
+alias gl='git log --oneline --graph --decorate -10'
+alias gla='git log --oneline --graph --decorate --all -20'
+
+# Branch management
+alias gb='git branch -vv'
+alias gba='git branch -avv'
+alias gco='git checkout'
+
+# View changes
+alias gd='git diff'
+alias gds='git diff --staged'
+alias gdm='git diff master..security-fixes-critical'
+
+# Show specific commits
+alias gshow='git show --stat'
+alias glast='git log -1 --stat'
+
+# Testing shortcuts
+alias test='pytest tests/ -v'
+alias testcov='pytest tests/ --cov=rwc --cov-report=term-missing'
+alias testfast='pytest tests/ -x --tb=short'
+alias testwatch='pytest-watch tests/ -v'
+
+# Pre-commit
+alias pc='pre-commit run --all-files'
+alias pci='pre-commit install'
+
+# Review this branch
+alias review-branch='git diff --stat master..security-fixes-critical'
+alias review-files='git diff --name-status master..security-fixes-critical'
+alias review-commits='git log --oneline master..security-fixes-critical'
+
+# Merge shortcuts (use with caution!)
+alias merge-to-master='git checkout master && git merge security-fixes-critical --no-ff'
+
+# Quick info
+alias project-stats='echo "Branch: $(git branch --show-current)" && echo "Commits: $(git rev-list --count HEAD)" && echo "Tests:" && pytest tests/ -q && echo "Coverage:" && pytest tests/ --cov=rwc --cov-report=term | tail -5'
+
+# Documentation
+alias docs='cat HIGH-PRIORITY-TASKS-COMPLETE.md'
+alias summary='cat FINAL-IMPROVEMENTS-REPORT.md | head -100'
+
+echo "Git aliases loaded for RWC project!"
+echo "Run 'alias' to see all available commands"
