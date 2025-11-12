@@ -229,10 +229,11 @@ class VoiceConverter:
             if result_path != output_path:
                 import shutil
                 shutil.move(str(result_path), str(output_path))
-                # Also move the metadata JSON if it exists
-                json_path = result_path.with_suffix('.json')
-                if json_path.exists():
-                    json_path.unlink()
+
+            # Also move the metadata JSON if it exists
+            json_path = result_path.with_suffix('.json')
+            if json_path.exists():
+                json_path.unlink()
             
             # Clean up temporary input file if created
             if temp_input:
