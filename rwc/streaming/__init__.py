@@ -10,10 +10,10 @@ Phase 1 (Current):
     - Expected latency: 500-700ms
     - Simple, production-ready implementation
 
-Phase 2 (Future):
+Phase 2 (Implemented):
     - StreamingConverter: Direct PyTorch chunk processing
-    - Expected latency: 90-170ms
-    - Requires custom RVC streaming implementation
+    - Expected latency: 150-200ms
+    - Native RVC inference without file I/O
 
 Components:
 ----------
@@ -68,6 +68,7 @@ from .backends import ConversionBackend, ConversionConfig, ConversionMetrics
 from .buffer import BufferManager, BufferConfig
 from .pipeline import StreamingPipeline
 from .batch_backend import BatchConverter
+from .streaming_backend import StreamingConverter
 
 __all__ = [
     # Abstract interfaces
@@ -84,6 +85,9 @@ __all__ = [
 
     # Phase 1 backend
     'BatchConverter',
+
+    # Phase 2 backend
+    'StreamingConverter',
 ]
 
 __version__ = '1.0.0'
