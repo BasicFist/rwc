@@ -8,7 +8,7 @@ import time
 import torch
 import librosa
 import numpy as np
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Union
 import configparser
 import shutil
 import subprocess
@@ -136,228 +136,126 @@ class VoiceConverter:
             print(f"RMVPE model not found at {rmvpe_path}, falling back to built-in pitch extraction")
             self.use_rmvpe = False
     
-    def convert_voice(self, input_audio_path: str, output_audio_path: str,
-                     pitch_change: Optional[int] = None, index_rate: Optional[float] = None) -> str:
+    def convert_voice(
+        self,
+        input_audio: Union[str, Path, np.ndarray],
+        output_audio: Union[str, Path],
+        pitch_shift: int = 0,
+        index_rate: float = 0.5,
+        sample_rate: int = 48000,
+    ) -> Path:
         """
-        Convert voice from input audio to target speaker using RVC
-
+        Convert voice using RVC model with ultimate-rvc backend
+        
         Args:
-            input_audio_path: Path to input audio file
-            output_audio_path: Path to save output audio file
-            pitch_change: Pitch change in semitones (uses config default if not specified)
-            index_rate: How much to use the feature index (0.0-1.0) (uses config default if not specified)
-
+            input_audio: Path to input audio or numpy array
+            output_audio: Path for output audio
+            pitch_shift: Pitch shift in semitones (-24 to +24)
+            index_rate: Feature retrieval strength (0.0 to 1.0)
+            sample_rate: Target sample rate (ignored, uses model's rate)
+            
         Returns:
-            Path to the output audio file
-
-        Raises:
-            FileNotFoundError: If input audio file doesn't exist
-            ValueError: If parameters are invalid
-            RuntimeError: If conversion fails
+            Path to converted audio file
         """
+        from ultimate_rvc.core.generate.common import convert as urvc_convert
+        from ultimate_rvc.typing_extra import F0Method, EmbedderModel
         from rwc.utils.validation import (
-            validate_audio_file_path,
             validate_pitch_change,
-            validate_index_rate,
-            ValidationError
+            validate_index_rate as validate_idx_rate,
+            validate_audio_file_path
         )
+        import tempfile
 
         logger = get_logger(__name__)
-
-        # Validate inputs
-        try:
-            input_path = validate_audio_file_path(input_audio_path)
-            output_path = validate_audio_file_path(output_audio_path, must_exist=False)
-
-            # Use config defaults if parameters not provided
-            default_pitch_change = self.config.getint('CONVERSION', 'default_pitch_change', fallback=0)
-            pitch_change = pitch_change if pitch_change is not None else default_pitch_change
-            pitch_change = validate_pitch_change(pitch_change)
-
-            default_index_rate = self.config.getfloat('CONVERSION', 'default_index_rate', fallback=0.75)
-            index_rate = index_rate if index_rate is not None else default_index_rate
-            index_rate = validate_index_rate(index_rate)
-
-        except ValidationError as e:
-            logger.error(f"Validation error: {e}")
-            raise ValueError(f"Invalid input: {e}")
-
-        logger.info(f"Converting voice: {input_path.name} -> {output_path.name}")
-        logger.debug(f"Pitch change: {pitch_change}, Index rate: {index_rate}")
-        logger.debug(f"Using {'RMVPE' if self.use_rmvpe else 'default'} pitch extraction")
+        logger.info("Starting voice conversion with ultimate-rvc backend")
 
         try:
-            # Step 1: Load input audio
-            logger.debug(f"Loading audio from {input_path}")
-            audio_data, sample_rate = librosa.load(
-                str(input_path),
-                sr=DEFAULT_SAMPLE_RATE,
-                mono=True
+            # Validate inputs
+            validate_pitch_change(pitch_shift)
+            validate_idx_rate(index_rate)
+            # Handle numpy array input by saving to temporary file
+            temp_input = None
+            if isinstance(input_audio, np.ndarray):
+                temp_input = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+                import soundfile as sf
+                sf.write(temp_input.name, input_audio, sample_rate)
+                input_path = temp_input.name
+            else:
+                input_path = str(input_audio)
+                validate_audio_file_path(input_path)
+            
+            # Extract model name from self.model_path
+            # Model should be in models/ directory with standard structure
+            model_path = Path(self.model_path)
+            model_name = model_path.parent.name  # e.g., "HomerSimpson2333333"
+            
+            # Create output directory if needed
+            output_path = Path(output_audio)
+            output_dir = output_path.parent
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Map rwc parameters to ultimate-rvc parameters
+            # ultimate-rvc uses semitones directly (same as rwc's pitch_shift)
+            # ultimate-rvc's index_rate maps directly to rwc's index_rate
+            
+            f0_methods = [F0Method.RMVPE]  # Use RMVPE for pitch extraction
+            if not self.use_rmvpe:
+                f0_methods = [F0Method.CREPE]  # Fallback to CREPE
+            
+            logger.info(f"Converting with model: {model_name}")
+            logger.info(f"Pitch shift: {pitch_shift} semitones")
+            logger.info(f"Index rate: {index_rate}")
+            logger.info(f"F0 method: {f0_methods[0]}")
+            
+            # Call ultimate-rvc's convert function
+            result_path = urvc_convert(
+                audio_track=input_path,
+                directory=output_dir,
+                model_name=model_name,
+                n_semitones=pitch_shift,
+                f0_methods=f0_methods,
+                index_rate=index_rate,
+                rms_mix_rate=1.0,  # Full volume envelope mixing
+                protect_rate=0.33,  # Protect consonants/breathing
+                hop_length=128,  # Standard hop length
+                split_audio=False,  # Process as single chunk
+                autotune_audio=False,  # No autotune by default
+                clean_audio=False,  # No noise reduction by default
+                embedder_model=EmbedderModel.CONTENTVEC,  # Standard embedder
+                sid=0,  # Default speaker ID
             )
-            logger.debug(f"Loaded audio: {len(audio_data)} samples @ {sample_rate}Hz")
-
-            # Step 2: Extract features using HuBERT
-            logger.debug("Extracting audio features with HuBERT")
-            # TODO: Implement HuBERT feature extraction
-            # This requires the RVC-Project's HuBERT model and feature extractor
-            # Expected output: feature vector of shape (time_steps, feature_dim)
-            features = self._extract_features_placeholder(audio_data, sample_rate)
-
-            # Step 3: Extract pitch using RMVPE or fallback method
-            logger.debug(f"Extracting pitch {'with RMVPE' if self.use_rmvpe else 'with fallback'}")
-            # TODO: Implement pitch extraction
-            # RMVPE provides more accurate pitch tracking than traditional methods
-            # Expected output: f0 curve (fundamental frequency over time)
-            f0_curve = self._extract_pitch_placeholder(audio_data, sample_rate)
-
-            # Step 4: Apply pitch shift if requested
-            if pitch_change != 0:
-                logger.debug(f"Applying pitch shift: {pitch_change} semitones")
-                f0_curve = self._apply_pitch_shift(f0_curve, pitch_change)
-
-            # Step 5: Apply RVC voice conversion
-            logger.debug("Applying RVC voice conversion")
-            # TODO: Implement RVC inference
-            # This is the core RVC algorithm that:
-            # 1. Uses the loaded RVC model to convert features
-            # 2. Applies feature index for speaker similarity (controlled by index_rate)
-            # 3. Combines with pitch information
-            # Expected output: converted audio waveform
-            converted_audio = self._rvc_inference_placeholder(
-                features, f0_curve, index_rate
-            )
-
-            # Step 6: Save output audio
-            logger.debug(f"Saving converted audio to {output_path}")
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            import soundfile as sf
-            sf.write(
-                str(output_path),
-                converted_audio,
-                samplerate=sample_rate,
-                subtype='PCM_16'
-            )
-
-            logger.info(f"Conversion completed: {output_path}")
-            return str(output_path)
-
-        except FileNotFoundError as e:
-            logger.error(f"File not found: {e}")
-            raise
+            
+            # Rename result to match expected output path
+            if result_path != output_path:
+                import shutil
+                shutil.move(str(result_path), str(output_path))
+                # Also move the metadata JSON if it exists
+                json_path = result_path.with_suffix('.json')
+                if json_path.exists():
+                    json_path.unlink()
+            
+            # Clean up temporary input file if created
+            if temp_input:
+                try:
+                    os.unlink(temp_input.name)
+                except:
+                    pass
+            
+            logger.info(f"Voice conversion completed: {output_path}")
+            return output_path
+            
         except Exception as e:
-            logger.error(f"Conversion failed: {e}", exc_info=True)
+            logger.error(f"Voice conversion failed: {e}")
             raise RuntimeError(f"Voice conversion failed: {e}")
 
-    def _extract_features_placeholder(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
-        """
-        Placeholder for HuBERT feature extraction
+    # NOTE: The following placeholder methods have been removed as of Nov 2025
+    # RVC inference is now handled by the ultimate-rvc package integration in convert_voice()
+    # Previous placeholder methods:
+    # - _extract_features_placeholder: HuBERT feature extraction (now in ultimate-rvc)
+    # - _extract_pitch_placeholder: RMVPE/CREPE pitch extraction (now in ultimate-rvc)
+    # - _rvc_inference_placeholder: RVC inference pipeline (now in ultimate-rvc)
+    # - _apply_pitch_shift: Pitch shifting (now handled by ultimate-rvc's n_semitones parameter)
 
-        TODO: Implement actual HuBERT feature extraction from RVC-Project
-        This requires:
-        1. Loading the HuBERT model (hubert_base.pt)
-        2. Preprocessing audio to HuBERT's expected format
-        3. Running inference to extract features
-        4. Post-processing features for RVC
-
-        Args:
-            audio_data: Audio waveform
-            sample_rate: Sample rate
-
-        Returns:
-            Feature array of shape (time_steps, feature_dim)
-        """
-        logger = get_logger(__name__)
-        logger.warning("Using placeholder feature extraction - RVC features not implemented")
-
-        # Return dummy features with correct shape
-        # Real HuBERT features are typically 256-dimensional
-        time_steps = len(audio_data) // 320  # Rough estimate
-        return np.zeros((time_steps, 256), dtype=np.float32)
-
-    def _extract_pitch_placeholder(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
-        """
-        Placeholder for pitch extraction
-
-        TODO: Implement RMVPE pitch extraction for accurate f0 tracking
-        Fallback to librosa's pyin or other methods when RMVPE unavailable
-
-        Args:
-            audio_data: Audio waveform
-            sample_rate: Sample rate
-
-        Returns:
-            F0 curve array
-        """
-        logger = get_logger(__name__)
-
-        if self.use_rmvpe:
-            logger.warning("Using placeholder pitch extraction - RMVPE not implemented")
-            # TODO: Implement RMVPE pitch extraction
-        else:
-            logger.debug("Using basic pitch extraction")
-
-        # Use librosa as temporary fallback
-        f0, voiced_flag, voiced_probs = librosa.pyin(
-            audio_data,
-            fmin=librosa.note_to_hz('C2'),
-            fmax=librosa.note_to_hz('C7'),
-            sr=sample_rate
-        )
-
-        # Fill unvoiced regions with zeros
-        f0 = np.nan_to_num(f0, nan=0.0)
-        return f0
-
-    def _apply_pitch_shift(self, f0_curve: np.ndarray, semitones: int) -> np.ndarray:
-        """
-        Apply pitch shift to f0 curve
-
-        Args:
-            f0_curve: Original f0 curve
-            semitones: Pitch shift in semitones
-
-        Returns:
-            Shifted f0 curve
-        """
-        # Pitch shift formula: f_new = f_old * 2^(semitones/12)
-        shift_ratio = 2.0 ** (semitones / 12.0)
-        return f0_curve * shift_ratio
-
-    def _rvc_inference_placeholder(
-        self, features: np.ndarray, f0_curve: np.ndarray, index_rate: float
-    ) -> np.ndarray:
-        """
-        Placeholder for RVC inference
-
-        TODO: Implement actual RVC inference from RVC-Project
-        This is the core voice conversion algorithm that:
-        1. Takes extracted features and pitch information
-        2. Uses the loaded RVC model to convert to target voice
-        3. Applies feature index for speaker similarity
-        4. Synthesizes output audio with vocoder
-
-        Args:
-            features: Extracted HuBERT features
-            f0_curve: Pitch curve
-            index_rate: How much to use feature index (0.0-1.0)
-
-        Returns:
-            Converted audio waveform
-        """
-        logger = get_logger(__name__)
-        logger.error("RVC inference not implemented - this is a placeholder")
-
-        raise NotImplementedError(
-            "RVC inference is not yet implemented. "
-            "To implement this, you need to:\n"
-            "1. Integrate the RVC-Project codebase\n"
-            "2. Load the trained RVC model (.pth file)\n"
-            "3. Implement the RVC inference pipeline\n"
-            "4. Integrate the vocoder for audio synthesis\n"
-            "See: https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI"
-        )
-    
     def real_time_convert(
         self,
         input_device: int = 0,
@@ -366,16 +264,32 @@ class VoiceConverter:
         meter_refresh: float = 0.1,
         pipewire_source: Optional[int] = None,
         pipewire_sink: Optional[int] = None,
+        chunk_size: int = 4096,
+        pitch_shift: int = 0,
+        index_rate: float = 0.75,
     ):
         """
         Perform real-time voice conversion using microphone input
-        
+
+        Args:
+            input_device: PyAudio input device index
+            output_device: PyAudio output device index
+            show_meter: Whether to show audio level meter
+            meter_refresh: Meter refresh rate in seconds
+            pipewire_source: PipeWire source node ID (for pw-cat)
+            pipewire_sink: PipeWire sink node ID (for pw-cat)
+            chunk_size: Processing chunk size in samples (default: 4096 = ~85ms @ 48kHz)
+            pitch_shift: Pitch shift in semitones (-24 to +24)
+            index_rate: Feature retrieval strength (0.0 to 1.0)
+
         Note: Real-time conversion requires the following additional dependencies:
         - PortAudio library (system library) - installed
         - PyAudio Python package - installed
+
+        Phase 1 Latency: 500-700ms (using BatchConverter with ultimate-rvc)
         """
         use_pwcat = shutil.which("pw-cat") is not None
-        
+
         if use_pwcat:
             print("pw-cat detected - using PipeWire default devices for streaming.")
             self._real_time_convert_pwcat(
@@ -383,25 +297,59 @@ class VoiceConverter:
                 meter_refresh=meter_refresh,
                 source_id=pipewire_source,
                 sink_id=pipewire_sink,
+                chunk_size=chunk_size,
+                pitch_shift=pitch_shift,
+                index_rate=index_rate,
             )
             return
-        
+
         import pyaudio
         import numpy as np
-        
+        from rwc.streaming import (
+            BatchConverter,
+            StreamingPipeline,
+            ConversionConfig,
+            BufferConfig
+        )
+
         print(f"Starting real-time conversion on device {input_device} -> {output_device}")
         print(f"Using {'RMVPE' if self.use_rmvpe else 'default'} pitch extraction")
-        
+        print(f"Chunk size: {chunk_size} samples (~{chunk_size / 48000 * 1000:.1f}ms @ 48kHz)")
+        print(f"Expected latency: 500-700ms (Phase 1 batch processing)")
+
         # Set up audio parameters
-        chunk = 1024  # Buffer size
+        chunk = 1024  # PyAudio buffer size (smaller for lower I/O latency)
         FORMAT = pyaudio.paFloat32
-        CHANNELS = 2  # Stereo input to match detected device
-        RATE = 48000  # Sample rate to match detected device
-        
+        CHANNELS = 1  # Mono for RVC processing
+        RATE = 48000  # Sample rate to match RVC models
+
+        # Initialize streaming pipeline
+        conversion_config = ConversionConfig(
+            model_path=str(self.model_path),
+            pitch_shift=pitch_shift,
+            index_rate=index_rate,
+            sample_rate=RATE,
+            use_rmvpe=self.use_rmvpe,
+            chunk_size=chunk_size
+        )
+
+        buffer_config = BufferConfig(
+            chunk_size=chunk_size,
+            sample_rate=RATE,
+            channels=CHANNELS
+        )
+
+        backend = BatchConverter(conversion_config)
+        pipeline = StreamingPipeline(backend, buffer_config)
+
         # Initialize PyAudio
         p = pyaudio.PyAudio()
         
         try:
+            # Start streaming pipeline
+            pipeline.start()
+            print("Streaming pipeline initialized successfully!")
+
             # Open input stream
             stream_in = p.open(
                 format=FORMAT,
@@ -411,7 +359,7 @@ class VoiceConverter:
                 input_device_index=input_device,
                 frames_per_buffer=chunk
             )
-            
+
             # Open output stream
             stream_out = p.open(
                 format=FORMAT,
@@ -421,27 +369,26 @@ class VoiceConverter:
                 output_device_index=output_device,
                 frames_per_buffer=chunk
             )
-            
+
             print("Real-time conversion streams opened successfully!")
             print("Recording and converting in real-time... (Press Ctrl+C to stop)")
             if show_meter:
                 print("Microphone level meter active (updates every "
                       f"{meter_refresh:.1f}s)")
-            
-            # For demonstration, just pass through audio with a simple processing
-            # In a real implementation, this would involve RVC-style processing
+
+            # Real-time conversion loop
             try:
                 last_meter_update = time.monotonic()
                 meter_bar_width = 30
                 epsilon = 1e-8
-                
+
                 while True:
                     # Read data from microphone
                     data = stream_in.read(chunk, exception_on_overflow=False)
-                    
+
                     # Convert to numpy array for processing
                     audio_array = np.frombuffer(data, dtype=np.float32)
-                    
+
                     if show_meter:
                         now = time.monotonic()
                         if now - last_meter_update >= meter_refresh:
@@ -455,26 +402,34 @@ class VoiceConverter:
                             )
                             sys.stdout.flush()
                             last_meter_update = now
-                    
-                    # Here would be the actual RVC processing
-                    # For now, just pass through with slight amplification to show processing
-                    processed_audio = audio_array * 1.1
-                    
+
+                    # Send audio to streaming pipeline for conversion
+                    pipeline.process_input(audio_array)
+
+                    # Get converted audio from pipeline
+                    processed_audio = pipeline.get_output(chunk)
+
+                    # If no output ready yet, use silence (startup latency)
+                    if processed_audio is None:
+                        processed_audio = np.zeros(chunk, dtype=np.float32)
+
                     # Convert back to bytes
                     output_data = processed_audio.astype(np.float32).tobytes()
-                    
+
                     # Play processed audio
                     stream_out.write(output_data)
-                    
+
             except KeyboardInterrupt:
                 print("\nReal-time conversion stopped by user.")
             finally:
                 if show_meter:
                     sys.stdout.write("\n")
                     sys.stdout.flush()
-            
+
         except Exception as e:
             print(f"Error during real-time conversion: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             # Clean up
             if 'stream_in' in locals():
@@ -484,6 +439,11 @@ class VoiceConverter:
                 stream_out.stop_stream()
                 stream_out.close()
             p.terminate()
+
+            # Stop streaming pipeline
+            if 'pipeline' in locals():
+                pipeline.stop()
+
             print("Real-time conversion streams closed.")
 
     def _real_time_convert_pwcat(
@@ -495,6 +455,9 @@ class VoiceConverter:
         meter_refresh: float = 0.1,
         source_id: Optional[int] = None,
         sink_id: Optional[int] = None,
+        chunk_size: int = 4096,
+        pitch_shift: int = 0,
+        index_rate: float = 0.75,
     ):
         """
         PipeWire-based real-time loop using pw-cat for capture/playback.
@@ -502,11 +465,16 @@ class VoiceConverter:
         Args:
             rate: Sample rate in Hz
             channels: Number of audio channels
-            chunk: Buffer size
+            chunk: PipeWire buffer size
             show_meter: Whether to show audio level meter
             meter_refresh: Meter refresh rate in seconds
             source_id: PipeWire source node ID (integer only)
             sink_id: PipeWire sink node ID (integer only)
+            chunk_size: Processing chunk size in samples (default: 4096 = ~85ms @ 48kHz)
+            pitch_shift: Pitch shift in semitones (-24 to +24)
+            index_rate: Feature retrieval strength (0.0 to 1.0)
+
+        Phase 1 Latency: 500-700ms (using BatchConverter with ultimate-rvc)
 
         Raises:
             ValueError: If parameters are invalid
@@ -517,6 +485,12 @@ class VoiceConverter:
             validate_sample_rate,
             validate_channels,
             ValidationError
+        )
+        from rwc.streaming import (
+            BatchConverter,
+            StreamingPipeline,
+            ConversionConfig,
+            BufferConfig
         )
 
         # Validate inputs to prevent command injection
@@ -531,6 +505,28 @@ class VoiceConverter:
         # Validate chunk size
         if not isinstance(chunk, int) or chunk < 64 or chunk > 8192:
             raise ValueError(f"Invalid chunk size: {chunk} (must be 64-8192)")
+
+        # Initialize streaming pipeline
+        conversion_config = ConversionConfig(
+            model_path=str(self.model_path),
+            pitch_shift=pitch_shift,
+            index_rate=index_rate,
+            sample_rate=rate,
+            use_rmvpe=self.use_rmvpe,
+            chunk_size=chunk_size
+        )
+
+        buffer_config = BufferConfig(
+            chunk_size=chunk_size,
+            sample_rate=rate,
+            channels=channels
+        )
+
+        backend = BatchConverter(conversion_config)
+        pipeline = StreamingPipeline(backend, buffer_config)
+
+        print(f"Chunk size: {chunk_size} samples (~{chunk_size / rate * 1000:.1f}ms @ {rate}Hz)")
+        print(f"Expected latency: 500-700ms (Phase 1 batch processing)")
 
         # Build command with validated parameters (safe from injection)
         record_cmd = [
@@ -562,6 +558,10 @@ class VoiceConverter:
         last_meter_update = time.monotonic()
 
         print("Opening PipeWire streams (default source/sink)...")
+
+        # Start streaming pipeline
+        pipeline.start()
+        print("Streaming pipeline initialized successfully!")
 
         record_proc = subprocess.Popen(
             record_cmd,
@@ -607,8 +607,18 @@ class VoiceConverter:
                         sys.stdout.flush()
                         last_meter_update = now
 
-                # Placeholder processing (pass-through with slight gain)
-                processed = np.clip(audio_array * 1.1, -1.0, 1.0)
+                # Send audio to streaming pipeline for conversion
+                pipeline.process_input(audio_array)
+
+                # Get converted audio from pipeline
+                processed = pipeline.get_output(chunk)
+
+                # If no output ready yet, use silence (startup latency)
+                if processed is None:
+                    processed = np.zeros(chunk, dtype=np.float32)
+
+                # Convert to int16 and write to playback
+                processed = np.clip(processed, -1.0, 1.0)
                 output_bytes = (processed * 32767.0).astype(np.int16).tobytes()
 
                 play_proc.stdin.write(output_bytes)
@@ -617,6 +627,8 @@ class VoiceConverter:
             print("\nReal-time conversion stopped by user.")
         except Exception as exc:
             print(f"\nError during PipeWire streaming: {exc}")
+            import traceback
+            traceback.print_exc()
         finally:
             if show_meter:
                 sys.stdout.write("\n")
@@ -629,6 +641,10 @@ class VoiceConverter:
 
             record_proc.terminate()
             play_proc.terminate()
+
+            # Stop streaming pipeline
+            if 'pipeline' in locals():
+                pipeline.stop()
 
             # Drain stderr for debugging
             for proc, label in [(record_proc, "record"), (play_proc, "playback")]:

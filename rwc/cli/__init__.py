@@ -87,19 +87,56 @@ def download_models():
 @click.option('--output-device', '-o', default=0, type=int, help='Output device ID (use "python -m rwc.utils.list_devices" to see available devices)')
 @click.option('--model', '-m', required=True, help='Path to RVC model file (.pth)')
 @click.option('--use-rmvpe/--no-rmvpe', default=True, help='Use RMVPE for pitch extraction (more accurate)')
-def real_time(input_device, output_device, model, use_rmvpe):
-    """Perform real-time voice conversion from microphone input."""
+@click.option('--chunk-size', '-c', default=4096, type=int, help='Processing chunk size in samples (default: 4096 = ~85ms @ 48kHz)')
+@click.option('--pitch-shift', '-p', default=0, type=int, help='Pitch shift in semitones (-24 to +24)')
+@click.option('--index-rate', '-r', default=0.75, type=float, help='Feature retrieval strength (0.0 to 1.0, default: 0.75)')
+def real_time(input_device, output_device, model, use_rmvpe, chunk_size, pitch_shift, index_rate):
+    """
+    Perform real-time voice conversion from microphone input.
+
+    Phase 1 Implementation:
+    - Uses BatchConverter (ultimate-rvc via temporary files)
+    - Expected latency: 500-700ms
+    - Production-ready RVC processing
+
+    Examples:
+        rwc real-time -m models/HomerSimpson/model.pth
+        rwc real-time -m models/Voice/model.pth -p 2 -r 0.5 -c 8192
+    """
     click.echo(f"Starting real-time conversion using model: {model}")
     click.echo(f"Input device: {input_device}, Output device: {output_device}")
     click.echo(f"Using {'RMVPE' if use_rmvpe else 'default'} pitch extraction")
-    
+    click.echo(f"Chunk size: {chunk_size} samples (~{chunk_size / 48000 * 1000:.1f}ms @ 48kHz)")
+    click.echo(f"Pitch shift: {pitch_shift} semitones")
+    click.echo(f"Index rate: {index_rate}")
+    click.echo(f"Expected latency: 500-700ms (Phase 1 batch processing)")
+
     if not os.path.exists(model):
         click.echo(f"Error: Model file not found: {model}")
         return
-    
+
+    # Validate parameters
+    if chunk_size < 1024 or chunk_size > 16384:
+        click.echo(f"Error: Chunk size must be between 1024 and 16384 samples")
+        return
+
+    if pitch_shift < -24 or pitch_shift > 24:
+        click.echo(f"Error: Pitch shift must be between -24 and +24 semitones")
+        return
+
+    if index_rate < 0.0 or index_rate > 1.0:
+        click.echo(f"Error: Index rate must be between 0.0 and 1.0")
+        return
+
     try:
         converter = VoiceConverter(model, use_rmvpe=use_rmvpe)
-        converter.real_time_convert(input_device=input_device, output_device=output_device)
+        converter.real_time_convert(
+            input_device=input_device,
+            output_device=output_device,
+            chunk_size=chunk_size,
+            pitch_shift=pitch_shift,
+            index_rate=index_rate
+        )
     except Exception as e:
         click.echo(f"Error during real-time conversion: {str(e)}")
 

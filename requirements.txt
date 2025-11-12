@@ -1,7 +1,7 @@
 torch>=2.0.0
 torchaudio>=2.0.0
 torchvision>=0.15.0
-numpy>=1.21.0
+numpy>=1.21.0,<3.0.0  # ultimate-rvc requires <3.0
 scipy>=1.7.0
 librosa>=0.10.0
 soundfile>=0.10.0
@@ -13,3 +13,8 @@ chardet>=4.0.0
 flask>=2.0.0
 click>=8.0.0
 colorama>=0.4.0
+
+# RVC inference backend (provides HuBERT, RMVPE, RVC pipeline)
+# Note: Requires Python 3.12+ for best compatibility
+ultimate-rvc>=0.5.15  # RVC voice conversion with RMVPE/CREPE pitch extraction
+faiss-cpu>=1.10.0  # Feature index for speaker similarity (required by ultimate-rvc)
