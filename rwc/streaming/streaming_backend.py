@@ -32,6 +32,7 @@ from rwc.utils.logging_config import get_logger
 # Import ultimate-rvc components for direct access
 from ultimate_rvc.rvc.infer.infer import VoiceConverter
 from ultimate_rvc.typing_extra import F0Method
+from scipy import signal
 
 logger = get_logger(__name__)
 
@@ -66,9 +67,9 @@ class StreamingConverter(ConversionBackend):
         self.voice_converter: Optional[VoiceConverter] = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Overlap-add parameters
-        self.overlap_samples = int(self.config.chunk_size * 0.25)  # 25% overlap
-        self.fade_samples = int(self.config.chunk_size * 0.1)  # 10% crossfade
+        # Overlap-add parameters - optimized for smoothness
+        self.overlap_samples = int(self.config.chunk_size * 0.5)  # 50% overlap for smoothness
+        self.fade_samples = int(self.config.chunk_size * 0.25)  # 25% crossfade (Hann window)
 
         # Context buffer for continuity
         self.context_buffer: Optional[np.ndarray] = None
@@ -82,6 +83,7 @@ class StreamingConverter(ConversionBackend):
 
         # Initialize crossfade state
         self._previous_output: Optional[np.ndarray] = None
+        self._previous_rms: Optional[float] = None  # Track RMS for volume consistency
 
     def initialize(self) -> None:
         """
@@ -238,9 +240,15 @@ class StreamingConverter(ConversionBackend):
                 pad_length = len(audio_chunk) - len(output_chunk)
                 output_chunk = np.pad(output_chunk, (0, pad_length), mode='constant')
 
+            # Normalize RMS for consistent volume between chunks
+            output_chunk = self._normalize_rms(output_chunk)
+
             # Apply crossfade with previous chunk for seamless transitions
             if hasattr(self, '_previous_output') and self._previous_output is not None:
                 output_chunk = self._apply_crossfade(self._previous_output, output_chunk)
+
+            # Apply smoothing filter to reduce high-frequency artifacts
+            output_chunk = self._apply_smoothing(output_chunk)
 
             # Store for next crossfade
             self._previous_output = output_chunk.copy()
@@ -273,10 +281,11 @@ class StreamingConverter(ConversionBackend):
         current_chunk: np.ndarray
     ) -> np.ndarray:
         """
-        Apply linear crossfade between previous and current chunk.
+        Apply Hann-windowed crossfade between previous and current chunk.
 
-        This reduces audible artifacts at chunk boundaries by smoothly
-        transitioning between chunks.
+        Uses Hann window for smoother transitions with less audible artifacts
+        compared to linear crossfading. The raised cosine shape provides
+        better frequency response and reduces spectral leakage.
 
         Args:
             previous_chunk: Previous output chunk
@@ -291,15 +300,17 @@ class StreamingConverter(ConversionBackend):
         if fade_len == 0:
             return current_chunk
 
-        # Create fade curves
-        fade_out = np.linspace(1.0, 0.0, fade_len)
-        fade_in = np.linspace(0.0, 1.0, fade_len)
+        # Create Hann window fade curves (raised cosine)
+        # Hann provides smoother transitions than linear
+        hann_window = np.hanning(fade_len * 2)
+        fade_out = hann_window[:fade_len]  # First half (1.0 → 0.0)
+        fade_in = hann_window[fade_len:]    # Second half (0.0 → 1.0)
 
         # Get tail of previous and head of current
         prev_tail = previous_chunk[-fade_len:]
         curr_head = current_chunk[:fade_len]
 
-        # Apply crossfade
+        # Apply Hann-windowed crossfade
         crossfaded_region = (prev_tail * fade_out) + (curr_head * fade_in)
 
         # Replace head of current chunk with crossfaded region
@@ -307,6 +318,68 @@ class StreamingConverter(ConversionBackend):
         result[:fade_len] = crossfaded_region
 
         return result
+
+    def _normalize_rms(self, audio_chunk: np.ndarray) -> np.ndarray:
+        """
+        Normalize RMS level for consistent volume between chunks.
+
+        Gradually adjusts volume to match previous chunk's RMS, preventing
+        sudden volume jumps that create audible artifacts.
+
+        Args:
+            audio_chunk: Audio to normalize
+
+        Returns:
+            RMS-normalized audio chunk
+        """
+        # Calculate current RMS
+        current_rms = np.sqrt(np.mean(audio_chunk**2))
+
+        if current_rms < 1e-6:  # Silence
+            return audio_chunk
+
+        # If we have previous RMS, blend towards it gradually
+        if self._previous_rms is not None and self._previous_rms > 1e-6:
+            # Use 50% blend to avoid abrupt changes
+            target_rms = 0.5 * self._previous_rms + 0.5 * current_rms
+            scale = target_rms / current_rms
+            # Limit scaling to avoid extreme adjustments
+            scale = np.clip(scale, 0.5, 2.0)
+            normalized = audio_chunk * scale
+        else:
+            normalized = audio_chunk
+
+        # Update previous RMS
+        self._previous_rms = np.sqrt(np.mean(normalized**2))
+
+        return normalized
+
+    def _apply_smoothing(self, audio_chunk: np.ndarray) -> np.ndarray:
+        """
+        Apply gentle smoothing filter to reduce high-frequency artifacts.
+
+        Uses a low-order Butterworth filter to remove harsh artifacts
+        from chunk processing while preserving voice quality.
+
+        Args:
+            audio_chunk: Audio to smooth
+
+        Returns:
+            Smoothed audio chunk
+        """
+        # Design gentle low-pass filter (cutoff at 8kHz for voice)
+        # This removes harsh artifacts while preserving voice clarity
+        nyquist = self.config.sample_rate / 2
+        cutoff = 8000  # Hz - above typical voice range
+        normalized_cutoff = cutoff / nyquist
+
+        # Use low-order filter (order=2) to minimize phase distortion
+        b, a = signal.butter(2, normalized_cutoff, btype='low')
+
+        # Apply filter with zero-phase (filtfilt) to avoid delay
+        smoothed = signal.filtfilt(b, a, audio_chunk)
+
+        return smoothed.astype(np.float32)
 
     def cleanup(self) -> None:
         """
@@ -322,6 +395,7 @@ class StreamingConverter(ConversionBackend):
         # Clear context buffer and crossfade state
         self.context_buffer = None
         self._previous_output = None
+        self._previous_rms = None
 
         # Force garbage collection
         import gc
