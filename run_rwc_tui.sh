@@ -4,4 +4,4 @@
 
 cd /home/miko/LAB/ai/services/rwc
 source venv/bin/activate
-python -m rwc.tui
+python -m rwc.tui_wth
