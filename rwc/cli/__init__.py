@@ -3,11 +3,13 @@ RWC Command Line Interface
 """
 import click
 import os
+
+from rwc import __version__
 from rwc.core import VoiceConverter
 
 
 @click.group()
-@click.version_option()
+@click.version_option(version=__version__, prog_name="rwc")
 def cli():
     """Real-time Voice Conversion CLI."""
     pass
