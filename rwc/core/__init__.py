@@ -60,8 +60,11 @@ class VoiceConverter:
         self.config_path = config_path or 'rwc/config.ini'
         self.config = self._load_config()
 
-        # Use parameter if provided, otherwise use config default
-        self.use_rmvpe = use_rmvpe if use_rmvpe is not None else self.config.getboolean('CONVERSION', 'use_rmvpe_by_default', fallback=True)
+        # Track whether RMVPE was requested and whether it's actually available
+        self.use_rmvpe = use_rmvpe if use_rmvpe is not None else self.config.getboolean(
+            'CONVERSION', 'use_rmvpe_by_default', fallback=True
+        )
+        self.rmvpe_available = False
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {self.device}")
@@ -132,9 +135,10 @@ class VoiceConverter:
             print(f"Loading RMVPE model from {rmvpe_path}")
             # In a full implementation, we would load the actual model here
             self.rmvpe_model = rmvpe_path
+            self.rmvpe_available = True
         else:
             print(f"RMVPE model not found at {rmvpe_path}, falling back to built-in pitch extraction")
-            self.use_rmvpe = False
+            self.rmvpe_available = False
     
     def convert_voice(
         self,
@@ -198,9 +202,11 @@ class VoiceConverter:
             # ultimate-rvc uses semitones directly (same as rwc's pitch_shift)
             # ultimate-rvc's index_rate maps directly to rwc's index_rate
             
-            f0_methods = [F0Method.RMVPE]  # Use RMVPE for pitch extraction
-            if not self.use_rmvpe:
-                f0_methods = [F0Method.CREPE]  # Fallback to CREPE
+            rmvpe_active = self.use_rmvpe and self.rmvpe_available
+            if self.use_rmvpe and not rmvpe_active:
+                logger.warning("RMVPE requested but model not available. Falling back to CREPE.")
+
+            f0_methods = [F0Method.RMVPE] if rmvpe_active else [F0Method.CREPE]
             
             logger.info(f"Converting with model: {model_name}")
             logger.info(f"Pitch shift: {pitch_shift} semitones")
