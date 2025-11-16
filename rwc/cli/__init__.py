@@ -1,10 +1,11 @@
 """
 RWC Command Line Interface
 """
-import click
 import os
-from rwc.core import VoiceConverter
 
+import click
+
+from rwc.core import VoiceConverter
 
 @click.group()
 @click.version_option()
@@ -87,17 +88,19 @@ def download_models():
 @click.option('--output-device', '-o', default=0, type=int, help='Output device ID (use "python -m rwc.utils.list_devices" to see available devices)')
 @click.option('--model', '-m', required=True, help='Path to RVC model file (.pth)')
 @click.option('--use-rmvpe/--no-rmvpe', default=True, help='Use RMVPE for pitch extraction (more accurate)')
-@click.option('--chunk-size', '-c', default=4096, type=int, help='Processing chunk size in samples (default: 4096 = ~85ms @ 48kHz)')
+@click.option('--pipewire-source', type=int, default=None, help='PipeWire source node id (pw-cat)')
+@click.option('--pipewire-sink', type=int, default=None, help='PipeWire sink node id (pw-cat)')
+@click.option('--chunk-size', '-c', default=2048, type=int, help='Processing chunk size in samples (default: 2048 ≈ 43ms @ 48kHz)')
 @click.option('--pitch-shift', '-p', default=0, type=int, help='Pitch shift in semitones (-24 to +24)')
 @click.option('--index-rate', '-r', default=0.75, type=float, help='Feature retrieval strength (0.0 to 1.0, default: 0.75)')
-def real_time(input_device, output_device, model, use_rmvpe, chunk_size, pitch_shift, index_rate):
+def real_time(input_device, output_device, model, use_rmvpe, pipewire_source, pipewire_sink, chunk_size, pitch_shift, index_rate):
     """
     Perform real-time voice conversion from microphone input.
 
-    Phase 1 Implementation:
-    - Uses BatchConverter (ultimate-rvc via temporary files)
-    - Expected latency: 500-700ms
-    - Production-ready RVC processing
+    Streaming Implementation:
+    - Uses StreamingConverter (no per-chunk disk I/O)
+    - Expected latency: <100ms with default chunk size
+    - Live latency meter printed to stdout
 
     Examples:
         rwc real-time -m models/HomerSimpson/model.pth
@@ -107,17 +110,19 @@ def real_time(input_device, output_device, model, use_rmvpe, chunk_size, pitch_s
     click.echo(f"Input device: {input_device}, Output device: {output_device}")
     click.echo(f"Using {'RMVPE' if use_rmvpe else 'default'} pitch extraction")
     click.echo(f"Chunk size: {chunk_size} samples (~{chunk_size / 48000 * 1000:.1f}ms @ 48kHz)")
+    if pipewire_source is not None or pipewire_sink is not None:
+        click.echo(f"PipeWire route: source={pipewire_source}, sink={pipewire_sink}")
     click.echo(f"Pitch shift: {pitch_shift} semitones")
     click.echo(f"Index rate: {index_rate}")
-    click.echo(f"Expected latency: 500-700ms (Phase 1 batch processing)")
+    click.echo("Target latency: <100ms (streaming)")
 
     if not os.path.exists(model):
         click.echo(f"Error: Model file not found: {model}")
         return
 
     # Validate parameters
-    if chunk_size < 1024 or chunk_size > 16384:
-        click.echo(f"Error: Chunk size must be between 1024 and 16384 samples")
+    if chunk_size < 256 or chunk_size > 16384:
+        click.echo(f"Error: Chunk size must be between 256 and 16384 samples")
         return
 
     if pitch_shift < -24 or pitch_shift > 24:
@@ -133,6 +138,8 @@ def real_time(input_device, output_device, model, use_rmvpe, chunk_size, pitch_s
         converter.real_time_convert(
             input_device=input_device,
             output_device=output_device,
+            pipewire_source=pipewire_source,
+            pipewire_sink=pipewire_sink,
             chunk_size=chunk_size,
             pitch_shift=pitch_shift,
             index_rate=index_rate

@@ -1,18 +1,15 @@
 """
 Streaming RVC Backend - Phase 2 Implementation
 
-This module implements native PyTorch streaming for <200ms latency.
-Uses direct model inference without file I/O, matching RVC-Project's
-real-time implementation strategy.
+This module implements native PyTorch streaming for sub-100 ms latency.
+It avoids per-chunk file I/O entirely by running the RVC pipeline over
+numpy arrays and keeping model state resident on the GPU/CPU.
 
 Architecture:
-- Direct numpy array processing (no temp files)
+- Direct numpy array processing (no temp files or disk seeks)
 - Overlap-add windowing (SOLA) for seamless audio
 - Context management for chunk continuity
 - GPU-optimized pipeline
-
-Author: Claude Code
-Date: 2025-11-12
 """
 
 from __future__ import annotations
@@ -23,7 +20,6 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import soundfile as sf
 import torch
 
 from rwc.streaming.backends import ConversionBackend, ConversionConfig
@@ -66,6 +62,7 @@ class StreamingConverter(ConversionBackend):
         super().__init__(config)
         self.voice_converter: Optional[VoiceConverter] = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.chunk_duration_ms = (self.config.chunk_size / self.config.sample_rate) * 1000
 
         # Overlap-add parameters - optimized for smoothness
         self.overlap_samples = int(self.config.chunk_size * 0.5)  # 50% overlap for smoothness
@@ -77,7 +74,7 @@ class StreamingConverter(ConversionBackend):
 
         logger.info("Initializing StreamingConverter (Phase 2)")
         logger.info(f"Device: {self.device}")
-        logger.info(f"Chunk size: {self.config.chunk_size} samples")
+        logger.info(f"Chunk size: {self.config.chunk_size} samples ({self.chunk_duration_ms:.1f}ms)")
         logger.info(f"Overlap: {self.overlap_samples} samples ({self.overlap_samples/self.config.chunk_size*100:.1f}%)")
         logger.info(f"Crossfade: {self.fade_samples} samples")
 
@@ -259,7 +256,8 @@ class StreamingConverter(ConversionBackend):
             # Update metrics
             processing_time = (time.perf_counter() - start_time) * 1000
             self.metrics.processing_time_ms = processing_time
-            self.metrics.chunk_latency_ms = processing_time
+            # Total chunk latency approximates capture → inference → render
+            self.metrics.chunk_latency_ms = processing_time + self.chunk_duration_ms
             self.metrics.total_chunks_processed += 1
 
             logger.debug(
@@ -412,16 +410,13 @@ class StreamingConverter(ConversionBackend):
         Returns:
             Dictionary with latency breakdown in milliseconds
         """
-        chunk_duration_ms = (self.config.chunk_size / self.config.sample_rate) * 1000
-
-        # Phase 2 latency estimates (based on RVC-Project benchmarks)
-        inference_latency_ms = 50.0  # Direct PyTorch inference
-        overhead_ms = 10.0  # Context management, crossfading
+        inference_latency_ms = max(self.metrics.processing_time_ms, 0.0)
+        overhead_ms = max(self.metrics.chunk_latency_ms - inference_latency_ms, 0.0)
 
         return {
-            "chunk_duration_ms": chunk_duration_ms,
+            "chunk_duration_ms": self.chunk_duration_ms,
             "inference_ms": inference_latency_ms,
             "overhead_ms": overhead_ms,
-            "total_ms": chunk_duration_ms + inference_latency_ms + overhead_ms,
+            "total_ms": max(self.metrics.chunk_latency_ms, self.chunk_duration_ms + inference_latency_ms),
             "backend": "StreamingConverter (Phase 2)"
         }

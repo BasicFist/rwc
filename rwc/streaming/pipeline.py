@@ -165,7 +165,11 @@ class StreamingPipeline:
 
             # Update metrics
             processing_time_ms = (end_time - start_time) * 1000
-            self.total_latency_ms = self.backend.get_latency_estimate_ms()
+            buffer_health = self.buffer.get_buffer_health()
+            self.total_latency_ms = (
+                self.backend.get_latency_estimate_ms()
+                + buffer_health.get('total_latency_ms', 0.0)
+            )
 
             # Call metrics callback (if provided and interval elapsed)
             now = time.time()
@@ -175,7 +179,7 @@ class StreamingPipeline:
                     'total_latency_ms': self.total_latency_ms,
                     'chunks_processed': self.backend.metrics.total_chunks_processed,
                     'dropped_chunks': self.backend.metrics.dropped_chunks,
-                    'buffer_health': self.buffer.get_buffer_health()
+                    'buffer_health': buffer_health
                 }
                 try:
                     self.on_metrics_update(metrics)

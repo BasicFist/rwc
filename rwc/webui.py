@@ -83,7 +83,10 @@ def start_real_time_conversion_gui(model_path, input_device, output_device, use_
     )
     real_time_thread.start()
     
-    return f"Real-time conversion started with model: {model_path.split('/')[-1]}"
+    return (
+        "Real-time streaming started (sub-100ms target). "
+        f"Model: {model_path.split('/')[-1]}"
+    )
 
 def _real_time_worker_gui(model_path, input_device, output_device, use_rmvpe, stop_flag):
     """
@@ -93,7 +96,10 @@ def _real_time_worker_gui(model_path, input_device, output_device, use_rmvpe, st
         # In a real implementation, this would handle actual real-time conversion
         # But for web interface, we'll indicate that the command to start real-time
         # conversion has been issued
-        command = f"rwc real-time --input-device {input_device} --output-device {output_device} --model \"{model_path}\" --{'use-rmvpe' if use_rmvpe else 'no-rmvpe'}"
+        command = (
+            f"rwc real-time --input-device {input_device} --output-device {output_device} "
+            f"--model \"{model_path}\" --{'use-rmvpe' if use_rmvpe else 'no-rmvpe'} --chunk-size 2048"
+        )
         print(f"Real-time conversion command prepared:")
         print(command)
         print("Note: Copy and run this command in your terminal for actual real-time conversion.")

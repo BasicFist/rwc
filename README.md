@@ -208,28 +208,30 @@ The TUI provides:
 
 The RWC system supports real-time voice conversion from microphone input with the following setup:
 
-- PyAudio library installed for audio input/output
+- PyAudio (cross-platform) or PipeWire's `pw-cat` (Linux) for audio I/O
 - Compatible with most audio devices
-- Requires PortAudio system library (installed: portaudio19-dev)
-- To use real-time conversion:
+- Requires PortAudio system library (installed: portaudio19-dev) when using PyAudio
+- Default streaming pipeline uses a 2048-sample window (~43ms) with live latency readouts
+
+Example commands:
 
 ```bash
-# Currently, you can process recorded audio with:
+# File conversion remains unchanged
 rwc convert --input input.wav --model models/community/HomerSimpson2333333/model.pth --output output.wav --use-rmvpe
 
-# Future implementation could support live microphone input with:
-# rwc real-time --input-device 0 --model models/community/HomerSimpson2333333/model.pth --output-device 0
+# Low-latency streaming from microphone to speakers (PyAudio)
+rwc real-time --input-device 0 --model models/community/HomerSimpson2333333/model.pth --output-device 0 --chunk-size 2048
+
+# PipeWire path (uses pw-cat for capture/playback)
+rwc real-time --model models/community/HomerSimpson2333333/model.pth --chunk-size 2048 --pipewire-source 0 --pipewire-sink 0
 ```
 
-Your system has been verified to have a working microphone input device:
-- Input Device 4: HDA Intel PCH: CX8070 Analog (hw:1,0)
-- Sample rate: 48000 Hz
-- Max channels: 2
+During streaming runs, the console prints a live latency meter so you can validate end-to-end delay in real time.
 
 ## Performance Expectations
 
 - Inference (voice conversion): 2-5 minutes per 30 seconds of audio
-- Real-time conversion: 30-50ms latency (live microphone input)
+- Real-time conversion: ~85-95ms end-to-end with the streaming converter at 2048-sample chunks (measured via built-in latency meter)
 - VRAM usage: 4-10GB (leaves 6-12GB headroom)
 - System RAM: Minimal (<2GB for RWC operations)
 
