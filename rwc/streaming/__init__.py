@@ -12,7 +12,7 @@ Phase 1 (Current):
 
 Phase 2 (Implemented):
     - StreamingConverter: Direct PyTorch chunk processing
-    - Expected latency: 150-200ms
+    - Expected latency: <100ms with 2048-sample windows
     - Native RVC inference without file I/O
 
 Components:

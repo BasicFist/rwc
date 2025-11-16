@@ -264,7 +264,7 @@ class VoiceConverter:
         meter_refresh: float = 0.1,
         pipewire_source: Optional[int] = None,
         pipewire_sink: Optional[int] = None,
-        chunk_size: int = 4096,
+        chunk_size: int = 2048,
         pitch_shift: int = 0,
         index_rate: float = 0.75,
     ):
@@ -278,7 +278,7 @@ class VoiceConverter:
             meter_refresh: Meter refresh rate in seconds
             pipewire_source: PipeWire source node ID (for pw-cat)
             pipewire_sink: PipeWire sink node ID (for pw-cat)
-            chunk_size: Processing chunk size in samples (default: 4096 = ~85ms @ 48kHz)
+            chunk_size: Processing chunk size in samples (default: 2048 ≈ 43ms @ 48kHz)
             pitch_shift: Pitch shift in semitones (-24 to +24)
             index_rate: Feature retrieval strength (0.0 to 1.0)
 
@@ -286,7 +286,7 @@ class VoiceConverter:
         - PortAudio library (system library) - installed
         - PyAudio Python package - installed
 
-        Phase 1 Latency: 500-700ms (using BatchConverter with ultimate-rvc)
+        Target Latency: <100ms using StreamingConverter (no per-chunk disk I/O)
         """
         use_pwcat = shutil.which("pw-cat") is not None
 
@@ -306,6 +306,7 @@ class VoiceConverter:
         import pyaudio
         import numpy as np
         from rwc.streaming import (
+            StreamingConverter,
             BatchConverter,
             StreamingPipeline,
             ConversionConfig,
@@ -315,10 +316,10 @@ class VoiceConverter:
         print(f"Starting real-time conversion on device {input_device} -> {output_device}")
         print(f"Using {'RMVPE' if self.use_rmvpe else 'default'} pitch extraction")
         print(f"Chunk size: {chunk_size} samples (~{chunk_size / 48000 * 1000:.1f}ms @ 48kHz)")
-        print(f"Expected latency: 500-700ms (Phase 1 batch processing)")
+        print("Expected latency: <100ms with streaming backend")
 
         # Set up audio parameters
-        chunk = 1024  # PyAudio buffer size (smaller for lower I/O latency)
+        chunk = chunk_size  # Align device buffers with processing window
         FORMAT = pyaudio.paFloat32
         CHANNELS = 1  # Mono for RVC processing
         RATE = 48000  # Sample rate to match RVC models
@@ -339,8 +340,22 @@ class VoiceConverter:
             channels=CHANNELS
         )
 
-        backend = BatchConverter(conversion_config)
-        pipeline = StreamingPipeline(backend, buffer_config)
+        try:
+            backend = StreamingConverter(conversion_config)
+        except Exception:
+            print("Streaming backend initialization failed, falling back to batch mode (higher latency)")
+            backend = BatchConverter(conversion_config)
+
+        def _log_metrics(metrics: dict) -> None:
+            buffer_latency = metrics['buffer_health'].get('total_latency_ms', 0.0)
+            total_latency = metrics.get('total_latency_ms', 0.0)
+            processing_time = metrics.get('processing_time_ms', 0.0)
+            sys.stdout.write(
+                f"\rLatency ~{total_latency:.1f}ms (proc {processing_time:.1f}ms, buffer {buffer_latency:.1f}ms)"
+            )
+            sys.stdout.flush()
+
+        pipeline = StreamingPipeline(backend, buffer_config, on_metrics_update=_log_metrics)
 
         # Initialize PyAudio
         p = pyaudio.PyAudio()
@@ -444,18 +459,25 @@ class VoiceConverter:
             if 'pipeline' in locals():
                 pipeline.stop()
 
+            # Leave a clean newline after live latency updates
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+            # Leave a clean newline after live latency updates
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
             print("Real-time conversion streams closed.")
 
     def _real_time_convert_pwcat(
         self,
         rate: int = 48000,
         channels: int = 1,
-        chunk: int = 1024,
         show_meter: bool = True,
         meter_refresh: float = 0.1,
         source_id: Optional[int] = None,
         sink_id: Optional[int] = None,
-        chunk_size: int = 4096,
+        chunk_size: int = 2048,
         pitch_shift: int = 0,
         index_rate: float = 0.75,
     ):
@@ -465,16 +487,15 @@ class VoiceConverter:
         Args:
             rate: Sample rate in Hz
             channels: Number of audio channels
-            chunk: PipeWire buffer size
             show_meter: Whether to show audio level meter
             meter_refresh: Meter refresh rate in seconds
             source_id: PipeWire source node ID (integer only)
             sink_id: PipeWire sink node ID (integer only)
-            chunk_size: Processing chunk size in samples (default: 4096 = ~85ms @ 48kHz)
+            chunk_size: Processing chunk size in samples (default: 2048 ≈ 43ms @ 48kHz)
             pitch_shift: Pitch shift in semitones (-24 to +24)
             index_rate: Feature retrieval strength (0.0 to 1.0)
 
-        Phase 1 Latency: 500-700ms (using BatchConverter with ultimate-rvc)
+        Target Latency: <100ms using StreamingConverter (no per-chunk disk I/O)
 
         Raises:
             ValueError: If parameters are invalid
@@ -487,6 +508,7 @@ class VoiceConverter:
             ValidationError
         )
         from rwc.streaming import (
+            StreamingConverter,
             BatchConverter,
             StreamingPipeline,
             ConversionConfig,
@@ -503,8 +525,8 @@ class VoiceConverter:
             raise ValueError(f"Invalid parameter: {e}")
 
         # Validate chunk size
-        if not isinstance(chunk, int) or chunk < 64 or chunk > 8192:
-            raise ValueError(f"Invalid chunk size: {chunk} (must be 64-8192)")
+        if not isinstance(chunk_size, int) or chunk_size < 256 or chunk_size > 8192:
+            raise ValueError(f"Invalid chunk size: {chunk_size} (must be 256-8192)")
 
         # Initialize streaming pipeline
         conversion_config = ConversionConfig(
@@ -522,11 +544,25 @@ class VoiceConverter:
             channels=channels
         )
 
-        backend = BatchConverter(conversion_config)
-        pipeline = StreamingPipeline(backend, buffer_config)
+        try:
+            backend = StreamingConverter(conversion_config)
+        except Exception:
+            print("Streaming backend initialization failed, falling back to batch mode (higher latency)")
+            backend = BatchConverter(conversion_config)
+
+        def _log_metrics(metrics: dict) -> None:
+            buffer_latency = metrics['buffer_health'].get('total_latency_ms', 0.0)
+            total_latency = metrics.get('total_latency_ms', 0.0)
+            processing_time = metrics.get('processing_time_ms', 0.0)
+            sys.stdout.write(
+                f"\rLatency ~{total_latency:.1f}ms (proc {processing_time:.1f}ms, buffer {buffer_latency:.1f}ms)"
+            )
+            sys.stdout.flush()
+
+        pipeline = StreamingPipeline(backend, buffer_config, on_metrics_update=_log_metrics)
 
         print(f"Chunk size: {chunk_size} samples (~{chunk_size / rate * 1000:.1f}ms @ {rate}Hz)")
-        print(f"Expected latency: 500-700ms (Phase 1 batch processing)")
+        print("Expected latency: <100ms with streaming backend")
 
         # Build command with validated parameters (safe from injection)
         record_cmd = [
@@ -552,6 +588,7 @@ class VoiceConverter:
         play_cmd.append("-")
 
         bytes_per_sample = 2  # s16le
+        chunk = chunk_size  # Keep pw-cat buffers aligned to processing window
         bytes_per_chunk = chunk * channels * bytes_per_sample
         epsilon = 1e-8
         meter_bar_width = 30
