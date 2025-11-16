@@ -8,9 +8,8 @@ RWC (Real-time Voice Conversion) is a voice conversion system built on top of th
 
 ## Features
 
-- Real-time voice conversion based on RVC framework
-- Low latency processing
-- High-quality voice output
+- File-based voice conversion using RVC models (stable)
+- Experimental live microphone pipeline (Phase 1)
 - Configurable conversion parameters
 - API support for integration
 - Command-line interface
@@ -206,34 +205,18 @@ The TUI provides:
 
 ## Microphone Support
 
-The RWC system supports real-time voice conversion from microphone input with the following setup:
+RWC currently provides reliable file-based conversion. Live microphone support is available only as an experimental Phase 1 feature:
 
-- PyAudio library installed for audio input/output
-- Compatible with most audio devices
-- Requires PortAudio system library (installed: portaudio19-dev)
-- To use real-time conversion:
-
-```bash
-# Currently, you can process recorded audio with:
-rwc convert --input input.wav --model models/community/HomerSimpson2333333/model.pth --output output.wav --use-rmvpe
-
-# Future implementation could support live microphone input with:
-# rwc real-time --input-device 0 --model models/community/HomerSimpson2333333/model.pth --output-device 0
-```
-
-Your system has been verified to have a working microphone input device:
-- Input Device 4: HDA Intel PCH: CX8070 Analog (hw:1,0)
-- Sample rate: 48000 Hz
-- Max channels: 2
+- PyAudio and PortAudio are required for microphone capture.
+- Device compatibility is unverified; expect limited hardware coverage during this phase.
+- Use file-based conversion for dependable results while live capture stabilizes.
 
 ## Performance Expectations
 
-- Inference (voice conversion): 2-5 minutes per 30 seconds of audio
-- Real-time conversion: 30-50ms latency (live microphone input)
+- File-based conversion: depends on model size and hardware; batch processing is recommended for throughput.
+- Experimental live pipeline: expected end-to-end latency is currently 500–700 ms in Phase 1 builds.
 - VRAM usage: 4-10GB (leaves 6-12GB headroom)
 - System RAM: Minimal (<2GB for RWC operations)
-
-Your Quadro RTX 5000 provides exceptional performance—significantly faster than consumer RTX 3060 (12GB) with professional grade stability.
 
 ## Additional Models and Datasets
 
@@ -327,7 +310,7 @@ bash download_additional_models.sh
 
 ## Project Status & Documentation
 
-**Status**: ✅ Production-Ready (Security hardened, well-tested, documented)
+**Status**: 🛠️ Phase 1 for live microphone support; file-based conversion is stable.
 
 ### Recent Improvements (2025-11-11)
 - ✅ **Security**: All 4 critical vulnerabilities fixed (path traversal, debug mode, temp files, command injection)
